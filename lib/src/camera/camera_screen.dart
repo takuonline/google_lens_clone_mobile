@@ -76,7 +76,8 @@ class _CameraViewState extends State<CameraView>
   double _maxAvailableZoom = 1.0;
   double _currentScale = 1.0;
   double _baseScale = 1.0;
-  Image?  imgData;
+  Image? imgData;
+  String? imgLabel;
   // Counting pointers (number of user fingers on screen)
   int _pointers = 0;
 
@@ -155,7 +156,6 @@ class _CameraViewState extends State<CameraView>
   }
 
   Image imageFromBase64String(String base64String) {
-
     return Image.memory(base64Decode(base64String));
   }
 
@@ -169,23 +169,31 @@ class _CameraViewState extends State<CameraView>
       logger.i(base64Img.runtimeType);
       final Map<String, dynamic>? res = await api?.postImage(base64Img);
 
-
-
       if (res != null) {
-
-        String? label = res["label"];
-
-        if (res["output_img"] != null){
-
-
+        String? label = res["title"];
+        String? output_img = res["output_img"];
+        if (label != null) {
           setState(() {
-
-
-            imgData = imageFromBase64String(res["output_img"]) ;
-              });
-          logger.i(imgData.runtimeType);
-
+            imgLabel = label;
+          });
+          logger.i(label);
+        }else{
+          setState(() {
+            imgLabel = null;
+          });
         }
+
+        if (output_img != null) {
+          setState(() {
+            imgData = imageFromBase64String(output_img);
+          });
+        }else{
+          setState(() {
+            imgData = null;
+          });
+        }
+
+
 
       }
     }
@@ -221,6 +229,10 @@ class _CameraViewState extends State<CameraView>
       ),
       body: Column(
         children: <Widget>[
+          Container(
+            child: Text(imgLabel ?? ""),
+          ),
+
           Expanded(
             child: Container(
               child: Padding(
@@ -255,10 +267,10 @@ class _CameraViewState extends State<CameraView>
             ),
           ),
 
-          if (imgData!= null) Container(
-            child: imgData,
-          )
-
+          if (imgData != null)
+            Container(
+              child: imgData,
+            )
         ],
       ),
     );

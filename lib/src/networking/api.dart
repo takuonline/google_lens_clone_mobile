@@ -7,6 +7,8 @@ import 'package:http/http.dart' as http;
 class ApiService  extends ChangeNotifier {
   final logger = Logger();
   final baseUrl = "http://10.0.2.2:5000";
+  // final baseUrl = "http://192.168.1.109:5000";
+  // final baseUrl = "http://www.google.com";
 
   // Dio dio = Dio();
   // final DioOptions = BaseOptions(
