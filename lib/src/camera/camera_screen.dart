@@ -1,5 +1,7 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:typed_data';
+// import 'package:extended_image/extended_image.dart';
 import 'package:logger/logger.dart';
 
 import 'package:camera/camera.dart';
@@ -8,10 +10,9 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:video_player/video_player.dart';
 import 'package:image/image.dart' as image_lib;
+import 'package:crop_your_image/crop_your_image.dart';
 
 import 'dart:convert';
-import 'dart:io';
-import 'package:dio/dio.dart';
 
 import '../networking/api.dart';
 
@@ -63,23 +64,25 @@ class _CameraViewState extends State<CameraView>
   VideoPlayerController? videoController;
   VoidCallback? videoPlayerListener;
   bool enableAudio = true;
-  double _minAvailableExposureOffset = 0.0;
-  double _maxAvailableExposureOffset = 0.0;
-  double _currentExposureOffset = 0.0;
+  // final GlobalKey<ExtendedImageEditorState> editorKey =
+  //     GlobalKey<ExtendedImageEditorState>();
+  final cropController = CropController();
+
   late AnimationController _flashModeControlRowAnimationController;
   late Animation<double> _flashModeControlRowAnimation;
   late AnimationController _exposureModeControlRowAnimationController;
-  late Animation<double> _exposureModeControlRowAnimation;
   late AnimationController _focusModeControlRowAnimationController;
-  late Animation<double> _focusModeControlRowAnimation;
   double _minAvailableZoom = 1.0;
   double _maxAvailableZoom = 1.0;
   double _currentScale = 1.0;
   double _baseScale = 1.0;
-  Image? imgData;
+  Uint8List? imgData;
+  XFile? pictureTaken;
   String? imgLabel;
   // Counting pointers (number of user fingers on screen)
   int _pointers = 0;
+  // Rect? initialCropArea = Rect.fromLTWH(123.3, 194.5, 258.2, 368.7);
+  Rect? initialCropArea = const Rect.fromLTWH(129.5, 222.6, 270.2, 350.9);
 
   @override
   void initState() {
@@ -99,17 +102,10 @@ class _CameraViewState extends State<CameraView>
       duration: const Duration(milliseconds: 300),
       vsync: this,
     );
-    _exposureModeControlRowAnimation = CurvedAnimation(
-      parent: _exposureModeControlRowAnimationController,
-      curve: Curves.easeInCubic,
-    );
+
     _focusModeControlRowAnimationController = AnimationController(
       duration: const Duration(milliseconds: 300),
       vsync: this,
-    );
-    _focusModeControlRowAnimation = CurvedAnimation(
-      parent: _focusModeControlRowAnimationController,
-      curve: Curves.easeInCubic,
     );
   }
 
@@ -151,21 +147,32 @@ class _CameraViewState extends State<CameraView>
 
   String? getHealthCheck() {
     ApiService? api = context.read<ApiService?>();
-
     api?.getHealthCheck();
   }
 
-  Image imageFromBase64String(String base64String) {
-    return Image.memory(base64Decode(base64String));
+  Uint8List imageFromBase64String(String base64String) {
+    return base64Decode(base64String);
+  }
+
+  clipImg() {
+    // final ExtendedImageEditorState? state = editorKey.currentState;
+    // final EditActionDetails? action = state?.editAction!;
+    //
+    // final Rect? rect = state?.getCropRect();
+    // rect?.shift(Offset(90, 50));
+
+    // final Uint8List? rawClipImageData = state?.rawImageData;
   }
 
   void onTakePictureButtonPressed() async {
     ApiService? api = context.read<ApiService?>();
 
-    XFile? file = await takePicture();
+    setState(() async {
+      pictureTaken = await takePicture();
+    });
 
-    if (file != null) {
-      final base64Img = await imageToBase64(file);
+    if (pictureTaken != null) {
+      final base64Img = await imageToBase64(pictureTaken!);
       logger.i(base64Img.runtimeType);
       final Map<String, dynamic>? res = await api?.postImage(base64Img);
 
@@ -177,24 +184,22 @@ class _CameraViewState extends State<CameraView>
             imgLabel = label;
           });
           logger.i(label);
-        }else{
+        } else {
           setState(() {
             imgLabel = null;
           });
         }
 
         if (output_img != null) {
+          logger.i(res["bounds"]);
           setState(() {
             imgData = imageFromBase64String(output_img);
           });
-        }else{
+        } else {
           setState(() {
             imgData = null;
           });
         }
-
-
-
       }
     }
 
@@ -210,67 +215,109 @@ class _CameraViewState extends State<CameraView>
 
   @override
   Widget build(BuildContext context) {
+    MediaQueryData queryData;
+    queryData = MediaQuery.of(context);
     return Scaffold(
-      floatingActionButton: Align(
-        alignment: Alignment.bottomRight,
-        child: Column(
-          children: [
-            FloatingActionButton(
-              onPressed: getHealthCheck,
-              child: Icon(Icons.add),
-            ),
-            FloatingActionButton(onPressed: getHealthCheck)
-          ],
-        ),
-      ),
+      floatingActionButton: pictureTaken != null
+          ? FloatingActionButton(
+              onPressed: clipImg,
+              child: Icon(Icons.camera),
+            )
+          : null,
       key: _scaffoldKey,
-      appBar: AppBar(
-        title: const Text('Camera example'),
-      ),
+      // appBar: AppBar(
+      //   title: const Text('Camera example'),
+      // ),
       body: Column(
+        mainAxisAlignment: MainAxisAlignment.start,
+        mainAxisSize: MainAxisSize.max,
         children: <Widget>[
-          Container(
-            child: Text(imgLabel ?? ""),
-          ),
-
           Expanded(
-            child: Container(
-              child: Padding(
-                padding: const EdgeInsets.all(1.0),
-                child: Center(
+            child: Stack(
+              alignment: Alignment.topCenter,
+              children: [
+                Container(
                   child: _cameraPreviewWidget(),
-                ),
-              ),
-              decoration: BoxDecoration(
-                color: Colors.black,
-                border: Border.all(
-                  color:
-                      controller != null && controller!.value.isRecordingVideo
-                          ? Colors.redAccent
-                          : Colors.grey,
-                  width: 3.0,
-                ),
-              ),
-            ),
-          ),
-          _captureControlRowWidget(),
-          // _modeControlRowWidget(),
 
-          Padding(
-            padding: const EdgeInsets.all(5.0),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.start,
-              children: <Widget>[
-                _cameraTogglesRowWidget(),
-                _thumbnailWidget(),
+                  // decoration: BoxDecoration(
+                  //   color: Colors.black,
+                  //   border: Border.all(
+                  //     color:
+                  //         controller != null && controller!.value.isRecordingVideo
+                  //             ? Colors.redAccent
+                  //             : Colors.grey,
+                  //     width: 3.0,
+                  //   ),
+                  // ),
+                ),
+                if (pictureTaken != null && initialCropArea != null)
+                  Container(
+                    alignment: Alignment.topCenter,
+                    child: Crop(
+                        image: File(pictureTaken!.path).readAsBytesSync(),
+                        onMoved: (rect) {
+                          logger.i(rect.toString());
+                          // cropController.area = initialCropArea!;
+                        },
+                        radius: 20,
+                        initialArea: initialCropArea,
+                        // Rect.fromLTWH(240, 212, 800, 600)
+
+                        controller: cropController,
+                        onCropped: (image) {
+                          // do something with image data
+                        }),
+                  )
+                // Positioned.fill(
+                //   child: Align(
+                //     alignment: Alignment.topCenter,
+                //     child: ExtendedImage.file(
+                //       File(pictureTaken!.path),
+                //
+                //       width: 400,
+                //       border: null,
+                //
+                //       height: double.infinity,
+                //       alignment: Alignment.bottomRight,
+                //
+                //       // borderRadius: BorderRadius.circular(50),
+                //
+                //       // width: 400,
+                //       shape: BoxShape.rectangle,
+                //       fit: BoxFit.contain,
+                //       mode: ExtendedImageMode.editor,
+                //       extendedImageEditorKey: editorKey,
+                //
+                //       initEditorConfigHandler: (state) {
+                //
+                //         return EditorConfig(
+                //           maxScale: 8.0,
+                //
+                //           // initialCropAspectRatio: ,
+                //           //          cornerSize: Size(40,20),
+                //
+                //            cropRectPadding: EdgeInsets.all(50.0),
+                //           hitTestSize: 20.0,
+                //           // cropAspectRatio: queryData.devicePixelRatio
+                //         );
+                //       },
+                //     ),
+                //   ),
+                // )
               ],
             ),
           ),
+          Container(
+            child: Text(imgLabel ?? ""),
+          ),
+          _captureControlRowWidget(),
+          // _modeControlRowWidget(),
+          _cameraTogglesRowWidget(),
 
-          if (imgData != null)
-            Container(
-              child: imgData,
-            )
+          // if (imgData != null)
+          //   Container(
+          //     child: imgData,
+          //   )
         ],
       ),
     );
@@ -382,29 +429,6 @@ class _CameraViewState extends State<CameraView>
               color: Colors.blue,
               onPressed: controller != null ? onFlashModeButtonPressed : null,
             ),
-            // The exposure and focus mode are currently not supported on the web.
-            ...(!kIsWeb
-                ? [
-                    IconButton(
-                      icon: Icon(Icons.exposure),
-                      color: Colors.blue,
-                      onPressed: controller != null
-                          ? onExposureModeButtonPressed
-                          : null,
-                    ),
-                    IconButton(
-                      icon: Icon(Icons.filter_center_focus),
-                      color: Colors.blue,
-                      onPressed:
-                          controller != null ? onFocusModeButtonPressed : null,
-                    )
-                  ]
-                : []),
-            IconButton(
-              icon: Icon(enableAudio ? Icons.volume_up : Icons.volume_mute),
-              color: Colors.blue,
-              onPressed: controller != null ? onAudioModeButtonPressed : null,
-            ),
             IconButton(
               icon: Icon(controller?.value.isCaptureOrientationLocked ?? false
                   ? Icons.screen_lock_rotation
@@ -417,8 +441,6 @@ class _CameraViewState extends State<CameraView>
           ],
         ),
         _flashModeControlRowWidget(),
-        _exposureModeControlRowWidget(),
-        _focusModeControlRowWidget(),
       ],
     );
   }
@@ -473,144 +495,6 @@ class _CameraViewState extends State<CameraView>
     );
   }
 
-  Widget _exposureModeControlRowWidget() {
-    final ButtonStyle styleAuto = TextButton.styleFrom(
-      primary: controller?.value.exposureMode == ExposureMode.auto
-          ? Colors.orange
-          : Colors.blue,
-    );
-    final ButtonStyle styleLocked = TextButton.styleFrom(
-      primary: controller?.value.exposureMode == ExposureMode.locked
-          ? Colors.orange
-          : Colors.blue,
-    );
-
-    return SizeTransition(
-      sizeFactor: _exposureModeControlRowAnimation,
-      child: ClipRect(
-        child: Container(
-          color: Colors.grey.shade50,
-          child: Column(
-            children: [
-              Center(
-                child: Text("Exposure Mode"),
-              ),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                mainAxisSize: MainAxisSize.max,
-                children: [
-                  TextButton(
-                    child: Text('AUTO'),
-                    style: styleAuto,
-                    onPressed: controller != null
-                        ? () =>
-                            onSetExposureModeButtonPressed(ExposureMode.auto)
-                        : null,
-                    onLongPress: () {
-                      if (controller != null) {
-                        controller!.setExposurePoint(null);
-                        showInSnackBar('Resetting exposure point');
-                      }
-                    },
-                  ),
-                  TextButton(
-                    child: Text('LOCKED'),
-                    style: styleLocked,
-                    onPressed: controller != null
-                        ? () =>
-                            onSetExposureModeButtonPressed(ExposureMode.locked)
-                        : null,
-                  ),
-                  TextButton(
-                    child: Text('RESET OFFSET'),
-                    style: styleLocked,
-                    onPressed: controller != null
-                        ? () => controller!.setExposureOffset(0.0)
-                        : null,
-                  ),
-                ],
-              ),
-              Center(
-                child: Text("Exposure Offset"),
-              ),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                mainAxisSize: MainAxisSize.max,
-                children: [
-                  Text(_minAvailableExposureOffset.toString()),
-                  Slider(
-                    value: _currentExposureOffset,
-                    min: _minAvailableExposureOffset,
-                    max: _maxAvailableExposureOffset,
-                    label: _currentExposureOffset.toString(),
-                    onChanged: _minAvailableExposureOffset ==
-                            _maxAvailableExposureOffset
-                        ? null
-                        : setExposureOffset,
-                  ),
-                  Text(_maxAvailableExposureOffset.toString()),
-                ],
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _focusModeControlRowWidget() {
-    final ButtonStyle styleAuto = TextButton.styleFrom(
-      primary: controller?.value.focusMode == FocusMode.auto
-          ? Colors.orange
-          : Colors.blue,
-    );
-    final ButtonStyle styleLocked = TextButton.styleFrom(
-      primary: controller?.value.focusMode == FocusMode.locked
-          ? Colors.orange
-          : Colors.blue,
-    );
-
-    return SizeTransition(
-      sizeFactor: _focusModeControlRowAnimation,
-      child: ClipRect(
-        child: Container(
-          color: Colors.grey.shade50,
-          child: Column(
-            children: [
-              Center(
-                child: Text("Focus Mode"),
-              ),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                mainAxisSize: MainAxisSize.max,
-                children: [
-                  TextButton(
-                    child: Text('AUTO'),
-                    style: styleAuto,
-                    onPressed: controller != null
-                        ? () => onSetFocusModeButtonPressed(FocusMode.auto)
-                        : null,
-                    onLongPress: () {
-                      if (controller != null) controller!.setFocusPoint(null);
-                      showInSnackBar('Resetting focus point');
-                    },
-                  ),
-                  TextButton(
-                    child: Text('LOCKED'),
-                    style: styleLocked,
-                    onPressed: controller != null
-                        ? () => onSetFocusModeButtonPressed(FocusMode.locked)
-                        : null,
-                  ),
-                ],
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
   /// Display the control bar with buttons to take pictures and record videos.
   Widget _captureControlRowWidget() {
     final CameraController? cameraController = controller;
@@ -628,47 +512,6 @@ class _CameraViewState extends State<CameraView>
               ? onTakePictureButtonPressed
               : null,
         ),
-        IconButton(
-          icon: const Icon(Icons.videocam),
-          color: Colors.blue,
-          onPressed: cameraController != null &&
-                  cameraController.value.isInitialized &&
-                  !cameraController.value.isRecordingVideo
-              ? onVideoRecordButtonPressed
-              : null,
-        ),
-        IconButton(
-          icon: cameraController != null &&
-                  cameraController.value.isRecordingPaused
-              ? Icon(Icons.play_arrow)
-              : Icon(Icons.pause),
-          color: Colors.blue,
-          onPressed: cameraController != null &&
-                  cameraController.value.isInitialized &&
-                  cameraController.value.isRecordingVideo
-              ? (cameraController.value.isRecordingPaused)
-                  ? onResumeButtonPressed
-                  : onPauseButtonPressed
-              : null,
-        ),
-        IconButton(
-          icon: const Icon(Icons.stop),
-          color: Colors.red,
-          onPressed: cameraController != null &&
-                  cameraController.value.isInitialized &&
-                  cameraController.value.isRecordingVideo
-              ? onStopButtonPressed
-              : null,
-        ),
-        IconButton(
-          icon: const Icon(Icons.pause_presentation),
-          color:
-              cameraController != null && cameraController.value.isPreviewPaused
-                  ? Colors.red
-                  : Colors.blue,
-          onPressed:
-              cameraController == null ? null : onPausePreviewButtonPressed,
-        ),
       ],
     );
   }
@@ -685,11 +528,17 @@ class _CameraViewState extends State<CameraView>
       onNewCameraSelected(description);
     };
 
-    // getAvailableCameras();
-
     if (widget.availableCameras.isEmpty) {
       return const Text('No camera found');
     } else {
+      // for (CameraDescription cameraDescription in widget.availableCameras) {
+      //   controller != null && controller!.value.isRecordingVideo
+      //                   ? null
+      //                   :  onChanged(cameraDescription);
+      //   break;
+      // }
+
+      // dynamically generate list of available cameras
       for (CameraDescription cameraDescription in widget.availableCameras) {
         toggles.add(
           SizedBox(
@@ -760,16 +609,16 @@ class _CameraViewState extends State<CameraView>
       await cameraController.initialize();
       await Future.wait([
         // The exposure mode is currently not supported on the web.
-        ...(!kIsWeb
-            ? [
-                cameraController
-                    .getMinExposureOffset()
-                    .then((value) => _minAvailableExposureOffset = value),
-                cameraController
-                    .getMaxExposureOffset()
-                    .then((value) => _maxAvailableExposureOffset = value)
-              ]
-            : []),
+        // ...(!kIsWeb
+        //     ? [
+        //         cameraController
+        //             .getMinExposureOffset()
+        //             .then((value) => _minAvailableExposureOffset = value),
+        //         cameraController
+        //             .getMaxExposureOffset()
+        //             .then((value) => _maxAvailableExposureOffset = value)
+        //       ]
+        //     : []),
         cameraController
             .getMaxZoomLevel()
             .then((value) => _maxAvailableZoom = value),
@@ -802,31 +651,11 @@ class _CameraViewState extends State<CameraView>
     }
   }
 
-  void onExposureModeButtonPressed() {
-    if (_exposureModeControlRowAnimationController.value == 1) {
-      _exposureModeControlRowAnimationController.reverse();
-    } else {
-      _exposureModeControlRowAnimationController.forward();
-      _flashModeControlRowAnimationController.reverse();
-      _focusModeControlRowAnimationController.reverse();
-    }
-  }
-
-  void onFocusModeButtonPressed() {
-    if (_focusModeControlRowAnimationController.value == 1) {
-      _focusModeControlRowAnimationController.reverse();
-    } else {
-      _focusModeControlRowAnimationController.forward();
-      _flashModeControlRowAnimationController.reverse();
-      _exposureModeControlRowAnimationController.reverse();
-    }
-  }
-
-  void onAudioModeButtonPressed() {
-    enableAudio = !enableAudio;
-    if (controller != null) {
-      onNewCameraSelected(controller!.description);
-    }
+  void onSetFlashModeButtonPressed(FlashMode mode) {
+    setFlashMode(mode).then((_) {
+      if (mounted) setState(() {});
+      showInSnackBar('Flash mode set to ${mode.toString().split('.').last}');
+    });
   }
 
   void onCaptureOrientationLockButtonPressed() async {
@@ -847,141 +676,6 @@ class _CameraViewState extends State<CameraView>
     }
   }
 
-  void onSetFlashModeButtonPressed(FlashMode mode) {
-    setFlashMode(mode).then((_) {
-      if (mounted) setState(() {});
-      showInSnackBar('Flash mode set to ${mode.toString().split('.').last}');
-    });
-  }
-
-  void onSetExposureModeButtonPressed(ExposureMode mode) {
-    setExposureMode(mode).then((_) {
-      if (mounted) setState(() {});
-      showInSnackBar('Exposure mode set to ${mode.toString().split('.').last}');
-    });
-  }
-
-  void onSetFocusModeButtonPressed(FocusMode mode) {
-    setFocusMode(mode).then((_) {
-      if (mounted) setState(() {});
-      showInSnackBar('Focus mode set to ${mode.toString().split('.').last}');
-    });
-  }
-
-  void onVideoRecordButtonPressed() {
-    startVideoRecording().then((_) {
-      if (mounted) setState(() {});
-    });
-  }
-
-  void onStopButtonPressed() {
-    stopVideoRecording().then((file) {
-      if (mounted) setState(() {});
-      if (file != null) {
-        showInSnackBar('Video recorded to ${file.path}');
-        videoFile = file;
-        _startVideoPlayer();
-      }
-    });
-  }
-
-  Future<void> onPausePreviewButtonPressed() async {
-    final CameraController? cameraController = controller;
-
-    if (cameraController == null || !cameraController.value.isInitialized) {
-      showInSnackBar('Error: select a camera first.');
-      return;
-    }
-
-    if (cameraController.value.isPreviewPaused) {
-      await cameraController.resumePreview();
-    } else {
-      await cameraController.pausePreview();
-    }
-
-    if (mounted) setState(() {});
-  }
-
-  void onPauseButtonPressed() {
-    pauseVideoRecording().then((_) {
-      if (mounted) setState(() {});
-      showInSnackBar('Video recording paused');
-    });
-  }
-
-  void onResumeButtonPressed() {
-    resumeVideoRecording().then((_) {
-      if (mounted) setState(() {});
-      showInSnackBar('Video recording resumed');
-    });
-  }
-
-  Future<void> startVideoRecording() async {
-    final CameraController? cameraController = controller;
-
-    if (cameraController == null || !cameraController.value.isInitialized) {
-      showInSnackBar('Error: select a camera first.');
-      return;
-    }
-
-    if (cameraController.value.isRecordingVideo) {
-      // A recording is already started, do nothing.
-      return;
-    }
-
-    try {
-      await cameraController.startVideoRecording();
-    } on CameraException catch (e) {
-      _showCameraException(e);
-      return;
-    }
-  }
-
-  Future<XFile?> stopVideoRecording() async {
-    final CameraController? cameraController = controller;
-
-    if (cameraController == null || !cameraController.value.isRecordingVideo) {
-      return null;
-    }
-
-    try {
-      return cameraController.stopVideoRecording();
-    } on CameraException catch (e) {
-      _showCameraException(e);
-      return null;
-    }
-  }
-
-  Future<void> pauseVideoRecording() async {
-    final CameraController? cameraController = controller;
-
-    if (cameraController == null || !cameraController.value.isRecordingVideo) {
-      return null;
-    }
-
-    try {
-      await cameraController.pauseVideoRecording();
-    } on CameraException catch (e) {
-      _showCameraException(e);
-      rethrow;
-    }
-  }
-
-  Future<void> resumeVideoRecording() async {
-    final CameraController? cameraController = controller;
-
-    if (cameraController == null || !cameraController.value.isRecordingVideo) {
-      return null;
-    }
-
-    try {
-      await cameraController.resumeVideoRecording();
-    } on CameraException catch (e) {
-      _showCameraException(e);
-      rethrow;
-    }
-  }
-
   Future<void> setFlashMode(FlashMode mode) async {
     if (controller == null) {
       return;
@@ -989,35 +683,6 @@ class _CameraViewState extends State<CameraView>
 
     try {
       await controller!.setFlashMode(mode);
-    } on CameraException catch (e) {
-      _showCameraException(e);
-      rethrow;
-    }
-  }
-
-  Future<void> setExposureMode(ExposureMode mode) async {
-    if (controller == null) {
-      return;
-    }
-
-    try {
-      await controller!.setExposureMode(mode);
-    } on CameraException catch (e) {
-      _showCameraException(e);
-      rethrow;
-    }
-  }
-
-  Future<void> setExposureOffset(double offset) async {
-    if (controller == null) {
-      return;
-    }
-
-    setState(() {
-      _currentExposureOffset = offset;
-    });
-    try {
-      offset = await controller!.setExposureOffset(offset);
     } on CameraException catch (e) {
       _showCameraException(e);
       rethrow;
@@ -1035,35 +700,6 @@ class _CameraViewState extends State<CameraView>
       _showCameraException(e);
       rethrow;
     }
-  }
-
-  Future<void> _startVideoPlayer() async {
-    if (videoFile == null) {
-      return;
-    }
-
-    final VideoPlayerController vController = kIsWeb
-        ? VideoPlayerController.network(videoFile!.path)
-        : VideoPlayerController.file(File(videoFile!.path));
-
-    videoPlayerListener = () {
-      if (videoController != null && videoController!.value.size != null) {
-        // Refreshing the state to update video player with the correct ratio.
-        if (mounted) setState(() {});
-        videoController!.removeListener(videoPlayerListener!);
-      }
-    };
-    vController.addListener(videoPlayerListener!);
-    await vController.setLooping(true);
-    await vController.initialize();
-    await videoController?.dispose();
-    if (mounted) {
-      setState(() {
-        imageFile = null;
-        videoController = vController;
-      });
-    }
-    await vController.play();
   }
 
   Future<XFile?> takePicture() async {
