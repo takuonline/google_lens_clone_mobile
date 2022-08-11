@@ -163,6 +163,10 @@ class _CameraViewState extends State<CameraView>
   }
 
   _getDetection(Uint8List pictureTaken) async {
+    setState(() {
+      imgLabel = null;
+      productData.clear();
+    });
     ApiService? api = context.read<ApiService?>();
 
     final base64Img = await ImgDataToBase64(pictureTaken);
@@ -171,9 +175,14 @@ class _CameraViewState extends State<CameraView>
     if (res != null) {
       logger.d(res["label"]);
       logger.d(res["similar_products"]);
+
       String? label = res["title"];
       String? outputImg = res["output_img"];
-      productData = res["similar_products"];
+      setState(() {
+
+        productData = res["similar_products"];
+      });
+
       if (label != null) {
         setState(() {
           imgLabel = label;
@@ -264,7 +273,7 @@ class _CameraViewState extends State<CameraView>
                             decoration: BoxDecoration(
                               borderRadius: const BorderRadius.vertical(
                                   top: Radius.circular(30)),
-                              color: Colors.blue[100],
+                              color: Colors.white,
                             ),
                             child: GridView.builder(
                               gridDelegate:
@@ -288,6 +297,7 @@ class _CameraViewState extends State<CameraView>
                                     .contains("missing_product");
 
                                 return Card(
+                                  elevation: 10,
                                     margin: const EdgeInsets.only(
                                         top: 5 ,left:10,right:10,bottom: 10),
                                     child: Padding(

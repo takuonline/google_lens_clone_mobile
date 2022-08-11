@@ -9,6 +9,11 @@ import 'package:google_lense_clone/src//sample_feature/sample_item_details_view.
 import 'package:google_lense_clone/src//sample_feature/sample_item_list_view.dart';
 import 'package:google_lense_clone/src/settings/settings_view.dart';
 
+
+
+
+
+
 /// The Widget that configures your application.
 class MyApp extends StatelessWidget {
   const MyApp({
@@ -31,6 +36,8 @@ class MyApp extends StatelessWidget {
       animation: settingsController,
       builder: (BuildContext context, Widget? child) {
         return MaterialApp(
+
+
           // Providing a restorationScopeId allows the Navigator built by the
           // MaterialApp to restore the navigation stack when a user leaves and
           // returns to the app after it has been killed while running in the
@@ -61,8 +68,9 @@ class MyApp extends StatelessWidget {
           // Define a light and dark color theme. Then, read the user's
           // preferred ThemeMode (light, dark, or system default) from the
           // SettingsController to display the correct theme.
-          theme: FlexThemeData.light(scheme: FlexScheme.outerSpace).copyWith(),
-          darkTheme: ThemeData.dark(),
+          theme: FlexThemeData.light(scheme: FlexScheme.bahamaBlue).copyWith(),
+          darkTheme: FlexThemeData.dark( scheme: FlexScheme.bahamaBlue),
+
           themeMode: settingsController.themeMode,
           initialRoute: SampleItemListView.routeName,
 
