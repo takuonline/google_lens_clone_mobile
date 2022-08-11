@@ -64,8 +64,6 @@ class _CameraViewState extends State<CameraView>
   VideoPlayerController? videoController;
   VoidCallback? videoPlayerListener;
   bool enableAudio = true;
-  // final GlobalKey<ExtendedImageEditorState> editorKey =
-  //     GlobalKey<ExtendedImageEditorState>();
   final cropController = CropController();
 
   late AnimationController _flashModeControlRowAnimationController;
@@ -81,8 +79,8 @@ class _CameraViewState extends State<CameraView>
   String? imgLabel;
   // Counting pointers (number of user fingers on screen)
   int _pointers = 0;
-  // Rect? initialCropArea = Rect.fromLTWH(123.3, 194.5, 258.2, 368.7);
-  Rect? initialCropArea = const Rect.fromLTWH(129.5, 222.6, 270.2, 350.9);
+  Rect? initialCropArea = const Rect.fromLTRB(0.0, 482.9, 392.7, 603.3);
+  List productData = [];
 
   @override
   void initState() {
@@ -150,57 +148,66 @@ class _CameraViewState extends State<CameraView>
     api?.getHealthCheck();
   }
 
-  Uint8List imageFromBase64String(String base64String) {
+  Uint8List _base64ToImgData(String base64String) {
     return base64Decode(base64String);
   }
 
-  clipImg() {
-    // final ExtendedImageEditorState? state = editorKey.currentState;
-    // final EditActionDetails? action = state?.editAction!;
-    //
-    // final Rect? rect = state?.getCropRect();
-    // rect?.shift(Offset(90, 50));
+  Future<String> ImgDataToBase64(Uint8List file, {int? height}) async {
+    final image = image_lib.decodeImage(await file)!;
+    return base64Encode(image_lib.encodeJpg(image));
+  }
 
-    // final Uint8List? rawClipImageData = state?.rawImageData;
+  onCropped(Uint8List croppedImgData) {
+    logger.d("onCropped");
+    _getDetection(croppedImgData);
+  }
+
+  _getDetection(Uint8List pictureTaken) async {
+    ApiService? api = context.read<ApiService?>();
+
+    final base64Img = await ImgDataToBase64(pictureTaken);
+    final Map<String, dynamic>? res = await api?.postImage(base64Img);
+
+    if (res != null) {
+      logger.d(res["label"]);
+      logger.d(res["similar_products"]);
+      String? label = res["title"];
+      String? outputImg = res["output_img"];
+      productData = res["similar_products"];
+      if (label != null) {
+        setState(() {
+          imgLabel = label;
+        });
+        logger.i(label);
+      } else {
+        setState(() {
+          imgLabel = null;
+        });
+      }
+
+      if (outputImg != null) {
+        logger.i(res["bounds"]);
+        setState(() {
+          imgData = _base64ToImgData(outputImg);
+        });
+      } else {
+        setState(() {
+          imgData = null;
+        });
+      }
+    }
   }
 
   void onTakePictureButtonPressed() async {
-    ApiService? api = context.read<ApiService?>();
+    pictureTaken = await takePicture();
+    // setState(() {
+    //   cropController.rect = initialCropArea!;
+    // });
 
-    setState(() async {
-      pictureTaken = await takePicture();
-    });
-
+    setState(() {});
+    logger.d("Pic taken");
     if (pictureTaken != null) {
-      final base64Img = await imageToBase64(pictureTaken!);
-      logger.i(base64Img.runtimeType);
-      final Map<String, dynamic>? res = await api?.postImage(base64Img);
-
-      if (res != null) {
-        String? label = res["title"];
-        String? output_img = res["output_img"];
-        if (label != null) {
-          setState(() {
-            imgLabel = label;
-          });
-          logger.i(label);
-        } else {
-          setState(() {
-            imgLabel = null;
-          });
-        }
-
-        if (output_img != null) {
-          logger.i(res["bounds"]);
-          setState(() {
-            imgData = imageFromBase64String(output_img);
-          });
-        } else {
-          setState(() {
-            imgData = null;
-          });
-        }
-      }
+      _getDetection(await pictureTaken!.readAsBytes());
     }
 
     // if (mounted) {
@@ -217,109 +224,171 @@ class _CameraViewState extends State<CameraView>
   Widget build(BuildContext context) {
     MediaQueryData queryData;
     queryData = MediaQuery.of(context);
+    final size = queryData.size;
+
     return Scaffold(
-      floatingActionButton: pictureTaken != null
-          ? FloatingActionButton(
-              onPressed: clipImg,
-              child: Icon(Icons.camera),
-            )
-          : null,
       key: _scaffoldKey,
-      // appBar: AppBar(
-      //   title: const Text('Camera example'),
-      // ),
-      body: Column(
-        mainAxisAlignment: MainAxisAlignment.start,
-        mainAxisSize: MainAxisSize.max,
-        children: <Widget>[
-          Expanded(
-            child: Stack(
-              alignment: Alignment.topCenter,
-              children: [
-                Container(
-                  child: _cameraPreviewWidget(),
-
-                  // decoration: BoxDecoration(
-                  //   color: Colors.black,
-                  //   border: Border.all(
-                  //     color:
-                  //         controller != null && controller!.value.isRecordingVideo
-                  //             ? Colors.redAccent
-                  //             : Colors.grey,
-                  //     width: 3.0,
-                  //   ),
-                  // ),
-                ),
-                if (pictureTaken != null && initialCropArea != null)
+      body: WillPopScope(
+        onWillPop: () async {
+          logger.w("Will pop scope");
+          setState(() {
+            pictureTaken = null;
+          });
+          return false;
+        },
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.start,
+          mainAxisSize: MainAxisSize.max,
+          children: <Widget>[
+            Expanded(
+              child: Stack(
+                alignment: Alignment.topCenter,
+                children: [
                   Container(
-                    alignment: Alignment.topCenter,
-                    child: Crop(
-                        image: File(pictureTaken!.path).readAsBytesSync(),
-                        onMoved: (rect) {
-                          logger.i(rect.toString());
-                          // cropController.area = initialCropArea!;
-                        },
-                        radius: 20,
-                        initialArea: initialCropArea,
-                        // Rect.fromLTWH(240, 212, 800, 600)
-
-                        controller: cropController,
-                        onCropped: (image) {
-                          // do something with image data
-                        }),
+                    child: _cameraPreviewWidget(),
+                  ),
+                  if (pictureTaken != null
+                  // && initialCropArea != null
                   )
-                // Positioned.fill(
-                //   child: Align(
-                //     alignment: Alignment.topCenter,
-                //     child: ExtendedImage.file(
-                //       File(pictureTaken!.path),
-                //
-                //       width: 400,
-                //       border: null,
-                //
-                //       height: double.infinity,
-                //       alignment: Alignment.bottomRight,
-                //
-                //       // borderRadius: BorderRadius.circular(50),
-                //
-                //       // width: 400,
-                //       shape: BoxShape.rectangle,
-                //       fit: BoxFit.contain,
-                //       mode: ExtendedImageMode.editor,
-                //       extendedImageEditorKey: editorKey,
-                //
-                //       initEditorConfigHandler: (state) {
-                //
-                //         return EditorConfig(
-                //           maxScale: 8.0,
-                //
-                //           // initialCropAspectRatio: ,
-                //           //          cornerSize: Size(40,20),
-                //
-                //            cropRectPadding: EdgeInsets.all(50.0),
-                //           hitTestSize: 20.0,
-                //           // cropAspectRatio: queryData.devicePixelRatio
-                //         );
-                //       },
-                //     ),
-                //   ),
-                // )
-              ],
-            ),
-          ),
-          Container(
-            child: Text(imgLabel ?? ""),
-          ),
-          _captureControlRowWidget(),
-          // _modeControlRowWidget(),
-          _cameraTogglesRowWidget(),
+                    _buildCropWidget(),
+                  if (pictureTaken != null)
+                    SizedBox.expand(
+                      child: DraggableScrollableSheet(
+                        maxChildSize: 1,
+                        minChildSize: .1,
+                        initialChildSize: .1,
+                         builder: (BuildContext context,
+                            ScrollController scrollController) {
+                          return Container(
+                            padding: EdgeInsets.only(top: 20),
+                            decoration: BoxDecoration(
+                              borderRadius: const BorderRadius.vertical(
+                                  top: Radius.circular(30)),
+                              color: Colors.blue[100],
+                            ),
+                            child: GridView.builder(
+                              gridDelegate:
+                                  const SliverGridDelegateWithMaxCrossAxisExtent(
+                                      maxCrossAxisExtent: 200,
+                                      // childAspectRatio: 3 / 2,
+                                      crossAxisSpacing: 5,
+                                      mainAxisSpacing: 5),
+                              controller: scrollController,
+                              itemCount: productData.length,
+                              itemBuilder: (BuildContext context, int index) {
+                                // logger.i(productData.runtimeType);
+                                // logger.i(productData);
 
-          // if (imgData != null)
-          //   Container(
-          //     child: imgData,
-          //   )
-        ],
+                                final Map<String, dynamic> prod =
+                                    productData[index];
+
+                                final bool showImg = !prod["img"]
+                                    .toString()
+                                    .toLowerCase()
+                                    .contains("missing_product");
+
+                                return Card(
+                                    margin: const EdgeInsets.only(
+                                        top: 5 ,left:10,right:10,bottom: 10),
+                                    child: Padding(
+                                      padding: const EdgeInsets.all(12.0),
+                                      child: Column(
+                                        children: [
+                                          Text("${index + 1}  " +
+                                              prod["title"]),
+                                          const SizedBox(
+                                            height: 10,
+                                          ),
+                                          showImg
+                                              ? Image.network(
+                                                  prod["img"],
+                                                  height: 70,
+                                                )
+                                              : Image.network(
+                                                  "https://www.pnp.co.za" +
+                                                      prod["img"]
+                                                          .toString()
+                                                          .replaceAll(
+                                                              "140x140",
+                                                              "400x400"),
+                                                  height: 70,
+                                                )
+
+                                          // const FlutterLogo(
+                                          //         size: 50,
+                                          //       )
+                                        ],
+                                      ),
+                                    ));
+                              },
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                ],
+              ),
+            ),
+            Container(
+              // padding: EdgeInsets.all(2),
+              // margin: EdgeInsets.all(20),
+
+              color: Colors.red,
+              child: Text(imgLabel ?? ""),
+            ),
+
+            _captureControlWidget(),
+            // _modeControlRowWidget(),
+            _cameraTogglesRowWidget(),
+
+            // if (imgData != null)
+            //   Container(
+            //     child: imgData,
+            //   )
+          ],
+        ),
       ),
+    );
+  }
+
+  Crop _buildCropWidget() {
+    return Crop(
+      onCropped: onCropped,
+      image: File(pictureTaken!.path).readAsBytesSync(),
+
+      onMoved: (rect) {
+        // logger.i(rect.toString());
+        // cropController.area = initialCropArea!;
+      },
+      // initialAreaBuilder: (rect)  {
+      //
+      //
+      //   return rect;
+      // },
+      //   logger.i(rect.toString());
+      //   return initialCropArea!;
+      //
+      // },
+      // radius: 40,
+      // initialArea: initialCropArea,
+      baseColor: Colors.blue.shade900,
+
+      controller: cropController,
+
+      // cornerDotBuilder: (double a, EdgeAlignment b) {
+      //   // logger.i(a);
+      //   // logger.i(b);
+      //   return Container(
+      //       // width: 7,
+      //       // height: 70,
+      //       // decoration: const BoxDecoration(
+      //       //     color: Colors.white,
+      //       //     borderRadius: BorderRadius.only(
+      //       //       bottomLeft: Radius.circular(3000),
+      //       //       bottomRight: Radius.circular(3000),
+      //       //     ))
+      //   );
+      // },
     );
   }
 
@@ -337,22 +406,43 @@ class _CameraViewState extends State<CameraView>
         ),
       );
     } else {
+      // final size = MediaQuery.of(context).size;
+      // final aspectRation = controller!.value.aspectRatio;
+      // final deviceRatio = size.width / size.height;
+      final scale = 1 /
+          (controller!.value.aspectRatio *
+              MediaQuery.of(context).size.aspectRatio);
+
       return Listener(
         onPointerDown: (_) => _pointers++,
         onPointerUp: (_) => _pointers--,
-        child: CameraPreview(
-          controller!,
-          child: LayoutBuilder(
+        child: Transform.scale(
+          scale: scale,
+          child: CameraPreview(
+            controller!,
+            child: LayoutBuilder(
               builder: (BuildContext context, BoxConstraints constraints) {
-            return GestureDetector(
-              behavior: HitTestBehavior.opaque,
-              onScaleStart: _handleScaleStart,
-              onScaleUpdate: _handleScaleUpdate,
-              onTapDown: (details) => onViewFinderTap(details, constraints),
-            );
-          }),
+                return GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onScaleStart: _handleScaleStart,
+                  onScaleUpdate: _handleScaleUpdate,
+                  onTapDown: (details) => onViewFinderTap(details, constraints),
+                );
+              },
+            ),
+          ),
         ),
       );
+
+      //   child: Transform.scale(
+      //     scale: aspectRation / deviceRatio,
+      //     child: AspectRatio(
+      //       aspectRatio: aspectRation,
+      //       child: ,
+      //     ),
+      //   ),
+      // );
+
     }
   }
 
@@ -372,50 +462,6 @@ class _CameraViewState extends State<CameraView>
     await controller!.setZoomLevel(_currentScale);
   }
 
-  /// Display the thumbnail of the captured image or video.
-  Widget _thumbnailWidget() {
-    final VideoPlayerController? localVideoController = videoController;
-
-    return Expanded(
-      child: Align(
-        alignment: Alignment.centerRight,
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: <Widget>[
-            localVideoController == null && imageFile == null
-                ? Container()
-                : SizedBox(
-                    child: (localVideoController == null)
-                        ? (
-                            // The captured image on the web contains a network-accessible URL
-                            // pointing to a location within the browser. It may be displayed
-                            // either with Image.network or Image.memory after loading the image
-                            // bytes to memory.
-                            kIsWeb
-                                ? Image.network(imageFile!.path)
-                                : Image.file(File(imageFile!.path)))
-                        : Container(
-                            child: Center(
-                              child: AspectRatio(
-                                  aspectRatio:
-                                      localVideoController.value.size != null
-                                          ? localVideoController
-                                              .value.aspectRatio
-                                          : 1.0,
-                                  child: VideoPlayer(localVideoController)),
-                            ),
-                            decoration: BoxDecoration(
-                                border: Border.all(color: Colors.pink)),
-                          ),
-                    width: 64.0,
-                    height: 64.0,
-                  ),
-          ],
-        ),
-      ),
-    );
-  }
-
   /// Display a bar with buttons to change the flash and exposure modes
   Widget _modeControlRowWidget() {
     return Column(
@@ -425,7 +471,7 @@ class _CameraViewState extends State<CameraView>
           mainAxisSize: MainAxisSize.max,
           children: <Widget>[
             IconButton(
-              icon: Icon(Icons.flash_on),
+              icon: const Icon(Icons.flash_on),
               color: Colors.blue,
               onPressed: controller != null ? onFlashModeButtonPressed : null,
             ),
@@ -454,7 +500,7 @@ class _CameraViewState extends State<CameraView>
           mainAxisSize: MainAxisSize.max,
           children: [
             IconButton(
-              icon: Icon(Icons.flash_off),
+              icon: const Icon(Icons.flash_off),
               color: controller?.value.flashMode == FlashMode.off
                   ? Colors.orange
                   : Colors.blue,
@@ -463,7 +509,7 @@ class _CameraViewState extends State<CameraView>
                   : null,
             ),
             IconButton(
-              icon: Icon(Icons.flash_auto),
+              icon: const Icon(Icons.flash_auto),
               color: controller?.value.flashMode == FlashMode.auto
                   ? Colors.orange
                   : Colors.blue,
@@ -472,7 +518,7 @@ class _CameraViewState extends State<CameraView>
                   : null,
             ),
             IconButton(
-              icon: Icon(Icons.flash_on),
+              icon: const Icon(Icons.flash_on),
               color: controller?.value.flashMode == FlashMode.always
                   ? Colors.orange
                   : Colors.blue,
@@ -481,7 +527,7 @@ class _CameraViewState extends State<CameraView>
                   : null,
             ),
             IconButton(
-              icon: Icon(Icons.highlight),
+              icon: const Icon(Icons.highlight),
               color: controller?.value.flashMode == FlashMode.torch
                   ? Colors.orange
                   : Colors.blue,
@@ -496,37 +542,38 @@ class _CameraViewState extends State<CameraView>
   }
 
   /// Display the control bar with buttons to take pictures and record videos.
-  Widget _captureControlRowWidget() {
+  Widget _captureControlWidget() {
     final CameraController? cameraController = controller;
 
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-      mainAxisSize: MainAxisSize.max,
-      children: <Widget>[
-        IconButton(
-          icon: const Icon(Icons.camera_alt),
-          color: Colors.blue,
-          onPressed: cameraController != null &&
-                  cameraController.value.isInitialized &&
-                  !cameraController.value.isRecordingVideo
-              ? onTakePictureButtonPressed
-              : null,
-        ),
-      ],
-    );
+    return pictureTaken == null
+        ? FloatingActionButton(
+            child: const Icon(Icons.camera_alt),
+            // color: Colors.blue,
+            onPressed: cameraController != null &&
+                    cameraController.value.isInitialized &&
+                    !cameraController.value.isRecordingVideo
+                ? onTakePictureButtonPressed
+                : null,
+          )
+        : FloatingActionButton(
+            onPressed: () => cropController.crop(),
+            child: const Icon(Icons.search),
+          );
   }
 
   /// Display a row of toggle to select the camera (or a message if no camera is available).
   Widget _cameraTogglesRowWidget() {
     final List<Widget> toggles = <Widget>[];
 
-    final onChanged = (CameraDescription? description) {
+    void onChanged(CameraDescription? description) {
       if (description == null) {
         return;
       }
-
+      setState(() {
+        pictureTaken = null;
+      });
       onNewCameraSelected(description);
-    };
+    }
 
     if (widget.availableCameras.isEmpty) {
       return const Text('No camera found');
@@ -557,7 +604,7 @@ class _CameraViewState extends State<CameraView>
       }
     }
 
-    return Row(children: toggles);
+    return Row(mainAxisSize: MainAxisSize.min, children: toggles);
   }
 
   String timestamp() => DateTime.now().millisecondsSinceEpoch.toString();
@@ -633,12 +680,6 @@ class _CameraViewState extends State<CameraView>
     if (mounted) {
       setState(() {});
     }
-  }
-
-  Future<String> imageToBase64(XFile file, {int? height}) async {
-    final image = image_lib.decodeImage(await file.readAsBytes())!;
-    // final resizedImage = copyResize(image, height: height ?? 800);
-    return base64Encode(image_lib.encodeJpg(image));
   }
 
   void onFlashModeButtonPressed() {
