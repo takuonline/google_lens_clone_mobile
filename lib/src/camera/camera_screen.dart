@@ -2,8 +2,8 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
 // import 'package:extended_image/extended_image.dart';
+import 'package:get/get.dart';
 import 'package:logger/logger.dart';
-
 import 'package:camera/camera.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -11,10 +11,9 @@ import 'package:provider/provider.dart';
 import 'package:video_player/video_player.dart';
 import 'package:image/image.dart' as image_lib;
 import 'package:crop_your_image/crop_your_image.dart';
-
 import 'dart:convert';
-
 import '../networking/api.dart';
+import 'dart:math' as math;
 
 class CameraView extends StatefulWidget {
   static const routeName = "/camera";
@@ -55,6 +54,19 @@ void logError(String code, String? message) {
     print('Error: $code');
   }
 }
+//
+// double normalize(double x,double a,double b){
+//   return (b-a)* (x-math.min(x))/(math.max(x)-math.min(x)) + a
+//
+// }
+
+// [ 240, 320 ]  og py img
+
+// (392.7, 583.0)   img inside renderbox shape
+
+// (392.7, 642.3)   renderbox shape
+
+// 583.0
 
 class _CameraViewState extends State<CameraView>
     with WidgetsBindingObserver, TickerProviderStateMixin {
@@ -65,6 +77,7 @@ class _CameraViewState extends State<CameraView>
   VoidCallback? videoPlayerListener;
   bool enableAudio = true;
   final cropController = CropController();
+  GlobalKey cropAreaKey = GlobalKey();
 
   late AnimationController _flashModeControlRowAnimationController;
   late Animation<double> _flashModeControlRowAnimation;
@@ -79,7 +92,7 @@ class _CameraViewState extends State<CameraView>
   String? imgLabel;
   // Counting pointers (number of user fingers on screen)
   int _pointers = 0;
-  Rect? initialCropArea = const Rect.fromLTRB(0.0, 482.9, 392.7, 603.3);
+  Rect? initialCropArea;
   List productData = [];
 
   @override
@@ -159,10 +172,16 @@ class _CameraViewState extends State<CameraView>
 
   onCropped(Uint8List croppedImgData) {
     logger.d("onCropped");
-    _getDetection(croppedImgData);
+    _getDetection(croppedImgData, true);
   }
 
-  _getDetection(Uint8List pictureTaken) async {
+  void _getDetection(Uint8List pictureTaken, bool isUserFineTuned) async {
+    // double width = MediaQuery.of(context).size.width;
+    // double height = MediaQuery.of(context).size.height;
+    // area of the Crop widget output that's actually the image and not the padding
+    // double actualImgPercentage = 0.9076755410244435;
+    double actualImgPercentage = 1.2;
+
     setState(() {
       imgLabel = null;
       productData.clear();
@@ -174,13 +193,75 @@ class _CameraViewState extends State<CameraView>
 
     if (res != null) {
       logger.d(res["label"]);
-      logger.d(res["similar_products"]);
+      // logger.d(res["similar_products"]);
 
       String? label = res["title"];
       String? outputImg = res["output_img"];
-      setState(() {
+      List<dynamic> imShape = res["im_shape"];
+      logger.i(res["bounds"]);
+      logger.i(res["im_shape"]);
+      List<dynamic> bounds = res["bounds"].map((v) => v.toDouble()).toList();
 
+      setState(() {
         productData = res["similar_products"];
+
+        if (!isUserFineTuned) {
+          //TODO: use dynamic size of Crop widget instead of phone screen size
+          final keyContext = cropAreaKey.currentContext;
+          if (keyContext != null) {
+            // size of crop image Widget
+            final box = keyContext.findRenderObject() as RenderBox;
+            final double xScaleFactor = box.size.width / imShape[1];
+            final double yScaleFactor =
+                box.size.height / imShape[0]; // * actualImgPercentage;
+            logger.i(xScaleFactor);
+            logger.i(yScaleFactor);
+            logger.i(box.size);
+            // final pos = box.localToGlobal(Offset.zero);
+            // logger.i(box);
+            // logger.i(pos);
+            // logger.i(keyContext.size);
+
+            // logger.i(box.s
+            // ize.width);
+
+            // logger.i("width  height");
+            // logger.i(width);
+            // logger.i(height);
+
+            // double enlarge_factor = 1.3;
+            // double x_adjustment = box.size.width * 0.1;
+
+            double x1 = bounds[0] * xScaleFactor;
+            double x2 = bounds[2] * xScaleFactor;
+
+            // double y_adjustment =  box.size.width * 0.02;
+            double y1 = bounds[1] * yScaleFactor;
+            double y2 = bounds[3] * yScaleFactor;
+
+// for emulator
+//             double enlarge_factor = 1.3;
+//             double x_adjustment = box.size.width * 0.1;
+//             double x1 = math.max(bounds[0] - x_adjustment,box.size.width  );
+//             double x2 =  math.max(bounds[2] * enlarge_factor - x_adjustment,box.size.width  )  ;
+//
+//             // double y_adjustment =  box.size.width * 0.02;
+//             double y1 =  math.max(bounds[1],box.size.height) ;
+//             double y2 =  math.max(bounds[3] * enlarge_factor,box.size.height );
+
+            cropController.rect = Rect.fromPoints(
+                Offset(
+                  x1,
+                  y1,
+                ),
+                Offset(x2, y2));
+          }
+
+          // when user has not adjusted the crop area manually
+          // cropController.rect = Rect.fromPoints(
+          //     Offset(bounds[0] - width * 0.17, bounds[1] - height * 0.06),
+          //     Offset(bounds[2] - width * 0.10, bounds[3]));
+        }
       });
 
       if (label != null) {
@@ -216,7 +297,7 @@ class _CameraViewState extends State<CameraView>
     setState(() {});
     logger.d("Pic taken");
     if (pictureTaken != null) {
-      _getDetection(await pictureTaken!.readAsBytes());
+      _getDetection(await pictureTaken!.readAsBytes(), false);
     }
 
     // if (mounted) {
@@ -237,6 +318,8 @@ class _CameraViewState extends State<CameraView>
 
     return Scaffold(
       key: _scaffoldKey,
+      floatingActionButton: _captureControlWidget(),
+      floatingActionButtonLocation: FloatingActionButtonLocation.centerFloat,
       body: WillPopScope(
         onWillPop: () async {
           logger.w("Will pop scope");
@@ -249,29 +332,37 @@ class _CameraViewState extends State<CameraView>
           mainAxisAlignment: MainAxisAlignment.start,
           mainAxisSize: MainAxisSize.max,
           children: <Widget>[
-            Expanded(
+            SizedBox(
+              height: size.height * .8,
               child: Stack(
                 alignment: Alignment.topCenter,
                 children: [
-                  Container(
-                    child: _cameraPreviewWidget(),
-                  ),
-                  if (pictureTaken != null
-                  // && initialCropArea != null
-                  )
-                    _buildCropWidget(),
-                  if (pictureTaken != null)
+                  pictureTaken == null
+                      ? Container(
+                          decoration: const BoxDecoration(
+                            borderRadius: BorderRadius.vertical(
+                                bottom: Radius.circular(20)),
+                          ),
+                          child: _cameraPreviewWidget(),
+                        )
+                      : _buildCropWidget(),
+
+                  // if (pictureTaken != null
+                  // // && initialCropArea != null
+                  // ) _buildCropWidget(),
+
+                  if (pictureTaken != null && productData.isNotEmpty)
                     SizedBox.expand(
                       child: DraggableScrollableSheet(
                         maxChildSize: 1,
                         minChildSize: .1,
                         initialChildSize: .1,
-                         builder: (BuildContext context,
+                        builder: (BuildContext context,
                             ScrollController scrollController) {
                           return Container(
-                            padding: EdgeInsets.only(top: 20),
-                            decoration: BoxDecoration(
-                              borderRadius: const BorderRadius.vertical(
+                            padding: const EdgeInsets.only(top: 20),
+                            decoration: const BoxDecoration(
+                              borderRadius: BorderRadius.vertical(
                                   top: Radius.circular(30)),
                               color: Colors.white,
                             ),
@@ -297,15 +388,18 @@ class _CameraViewState extends State<CameraView>
                                     .contains("missing_product");
 
                                 return Card(
-                                  elevation: 10,
+                                    elevation: 10,
                                     margin: const EdgeInsets.only(
-                                        top: 5 ,left:10,right:10,bottom: 10),
+                                        top: 5,
+                                        left: 10,
+                                        right: 10,
+                                        bottom: 10),
                                     child: Padding(
                                       padding: const EdgeInsets.all(12.0),
                                       child: Column(
                                         children: [
-                                          Text("${index + 1}  " +
-                                              prod["title"]),
+                                          Text(
+                                              "${index + 1}  " + prod["title"]),
                                           const SizedBox(
                                             height: 10,
                                           ),
@@ -318,8 +412,7 @@ class _CameraViewState extends State<CameraView>
                                                   "https://www.pnp.co.za" +
                                                       prod["img"]
                                                           .toString()
-                                                          .replaceAll(
-                                                              "140x140",
+                                                          .replaceAll("140x140",
                                                               "400x400"),
                                                   height: 70,
                                                 )
@@ -361,44 +454,35 @@ class _CameraViewState extends State<CameraView>
     );
   }
 
-  Crop _buildCropWidget() {
-    return Crop(
-      onCropped: onCropped,
-      image: File(pictureTaken!.path).readAsBytesSync(),
+  Widget _buildCropWidget() {
+    return Container(
+      // decoration: BoxDecoration(
+      //   color: Colors.yellow
+      // ),
+      child: Crop(
+        key: cropAreaKey,
+        onCropped: onCropped,
+        image: File(pictureTaken!.path).readAsBytesSync(),
 
-      onMoved: (rect) {
-        // logger.i(rect.toString());
-        // cropController.area = initialCropArea!;
-      },
-      // initialAreaBuilder: (rect)  {
-      //
-      //
-      //   return rect;
-      // },
-      //   logger.i(rect.toString());
-      //   return initialCropArea!;
-      //
-      // },
-      // radius: 40,
-      // initialArea: initialCropArea,
-      baseColor: Colors.blue.shade900,
+        onMoved: (rect) {
+          logger.i(rect.toString());
+        },
+        // initialAreaBuilder: (rect)  {
+        //
+        //
+        //   return rect;
+        // },
+        //   logger.i(rect.toString());
+        //   return initialCropArea!;
+        //
+        // },
+        // radius: 40,
+        // initialArea: initialCropArea,
+        // baseColor: Colors.blue.shade900,
+        baseColor: Colors.white,
 
-      controller: cropController,
-
-      // cornerDotBuilder: (double a, EdgeAlignment b) {
-      //   // logger.i(a);
-      //   // logger.i(b);
-      //   return Container(
-      //       // width: 7,
-      //       // height: 70,
-      //       // decoration: const BoxDecoration(
-      //       //     color: Colors.white,
-      //       //     borderRadius: BorderRadius.only(
-      //       //       bottomLeft: Radius.circular(3000),
-      //       //       bottomRight: Radius.circular(3000),
-      //       //     ))
-      //   );
-      // },
+        controller: cropController,
+      ),
     );
   }
 
@@ -426,23 +510,31 @@ class _CameraViewState extends State<CameraView>
       return Listener(
         onPointerDown: (_) => _pointers++,
         onPointerUp: (_) => _pointers--,
-        child: Transform.scale(
-          scale: scale,
-          child: CameraPreview(
-            controller!,
-            child: LayoutBuilder(
-              builder: (BuildContext context, BoxConstraints constraints) {
-                return GestureDetector(
-                  behavior: HitTestBehavior.opaque,
-                  onScaleStart: _handleScaleStart,
-                  onScaleUpdate: _handleScaleUpdate,
-                  onTapDown: (details) => onViewFinderTap(details, constraints),
-                );
-              },
-            ),
+        child: CameraPreview(
+          controller!,
+          child: LayoutBuilder(
+            builder: (BuildContext context, BoxConstraints constraints) {
+              return GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onScaleStart: _handleScaleStart,
+                onScaleUpdate: _handleScaleUpdate,
+                onTapDown: (details) => onViewFinderTap(details, constraints),
+              );
+            },
           ),
         ),
       );
+
+      //
+      //   Transform.scale(
+      //     scale: scale,
+      //     child: ClipRRect(
+      //       borderRadius:
+      //           const BorderRadius.vertical(bottom: Radius.circular(20)),
+      //       child: ,
+      //     ),
+      //   ),
+      // );
 
       //   child: Transform.scale(
       //     scale: aspectRation / deviceRatio,
@@ -552,7 +644,7 @@ class _CameraViewState extends State<CameraView>
   }
 
   /// Display the control bar with buttons to take pictures and record videos.
-  Widget _captureControlWidget() {
+  FloatingActionButton _captureControlWidget() {
     final CameraController? cameraController = controller;
 
     return pictureTaken == null
@@ -566,7 +658,25 @@ class _CameraViewState extends State<CameraView>
                 : null,
           )
         : FloatingActionButton(
-            onPressed: () => cropController.crop(),
+            onPressed: () {
+              cropController.crop();
+              // setState(() {
+              //   double width = MediaQuery.of(context).size.width;
+              //   double height = MediaQuery.of(context).size.height;
+
+              // final Image img =  Image.memory(File(pictureTaken!.path).readAsBytesSync(),);
+              // logger.i(img.image);
+              // logger.i(img.width);
+
+              // Rect.fromPoints(Offset(width * 0.5, height * .5), Offset(width * 0.5, height * .5));
+              //     .fromCenter(
+              //     center: Offset(width * 0.5, height * .5),
+              //     width: 30,
+              //     height: 40
+              // );
+              // }
+              // );
+            }, // ,
             child: const Icon(Icons.search),
           );
   }

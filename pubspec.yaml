@@ -44,10 +44,10 @@ dependencies:
   dio: ^4.0.6
   logger: ^1.1.0
   flex_color_scheme: ^5.1.0
-  http: ^0.13.5
   image: ^3.2.0
+  crop_your_image: ^0.7.0
 #  image_cropper: ^3.0.0
-  crop_your_image: ^0.7.2
+
 #  extended_image: ^6.2.1
 #  image_editor: ^1.1.0
 #  oktoast: ^3.1.5

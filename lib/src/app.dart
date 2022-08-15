@@ -72,7 +72,7 @@ class MyApp extends StatelessWidget {
           darkTheme: FlexThemeData.dark( scheme: FlexScheme.bahamaBlue),
 
           themeMode: settingsController.themeMode,
-          initialRoute: SampleItemListView.routeName,
+          initialRoute: CameraView.routeName,
 
           // Define a function to handle named routes in order to support
           // Flutter web url navigation and deep linking.

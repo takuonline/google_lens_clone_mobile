@@ -1,30 +1,29 @@
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:logger/logger.dart';
-import 'package:http/http.dart' as http;
 
 class ApiService extends ChangeNotifier {
   final logger = Logger();
-  final baseUrl = "http://10.0.2.2:5000";
+  final baseUrl = "http://18.203.156.46:8000";
+  // final baseUrl = "http://1.1.1.1";
 
-  Map<String, String> _headers = {
+  // final baseUrl = "http://52.214.24.119:8000/";
+
+  // final baseUrl = "http://34.241.42.157:8000/";
+  // final baseUrl = "http://192.168.1.109:5000";
+  // final baseUrl = "http://52.50.63.28:5000/";
+  // final baseUrl = "https://google.com/";
+  final Map<String, String> _headers = {
     'Content-Type': 'application/json;charset=UTF-8',
     'Charset': 'utf-8',
-    'Connection' :"keep-alive",
-    'Content-Type': 'application/json;charset=UTF-8',
-    'Charset': 'utf-8'
+    'Connection': "keep-alive",
   };
-
-
-  // final baseUrl = "http://192.168.1.109:5000";
-  // final baseUrl = "http://www.google.com";
 
   // Dio dio = Dio();
   // final DioOptions = BaseOptions(
-  //
   //     // baseUrl: 'http://192.168.1.109:5000/',
   //     baseUrl: 'http://10.0.2.2',
-  //
+
   //     connectTimeout: 5000,
   //     receiveTimeout: 3000,
   //   );
@@ -38,11 +37,12 @@ class ApiService extends ChangeNotifier {
     logger.d(response.data.toString());
   }
 
-  Future<Map<String, dynamic>?> postImage(String img_data) async {
+  Future<Map<String, dynamic>?> postImage(String imgData) async {
     Response response;
     Dio dio = Dio();
-    Map<String, dynamic> data = {"img_data": img_data,"num_of_results": 20};
-    response = await dio.post(baseUrl + '/detect', data: data, options: Options(headers:_headers));
+    Map<String, dynamic> data = {"img_data": imgData, "num_of_results": 10};
+    response = await dio.post(baseUrl + '/detect',
+        data: data, options: Options(headers: _headers));
     logger.d(response.statusCode);
     String statusCode =
         response.statusCode != null ? response.statusCode.toString() : "";

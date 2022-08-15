@@ -36,9 +36,7 @@ class _SampleItemListViewState extends State<SampleItemListView> {
   final logger = Logger();
 
   String? getHealthCheck() {
-    var api = context.read<ApiService?>();
-
-    // api?.getConnection();
+    ApiService? api = context.read<ApiService?>();
     api?.getHealthCheck();
   }
 
