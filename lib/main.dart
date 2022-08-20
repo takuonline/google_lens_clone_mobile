@@ -1,6 +1,7 @@
 import 'package:camera/camera.dart';
 import 'package:flex_color_scheme/flex_color_scheme.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:google_lense_clone/src/networking/api.dart';
 
 import 'src/app.dart';
@@ -18,6 +19,10 @@ import 'package:provider/provider.dart';
 
 
 void main() async {
+
+
+  SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
+
   // Set up the SettingsController, which will glue user settings to multiple
   // Flutter Widgets.
 

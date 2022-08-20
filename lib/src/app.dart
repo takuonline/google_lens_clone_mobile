@@ -22,7 +22,7 @@ class MyApp extends StatelessWidget {
     required this.availableCameras,
   }) : super(key: key);
 
-  final availableCameras;
+  final List<CameraDescription> availableCameras;
 
   final SettingsController settingsController;
 

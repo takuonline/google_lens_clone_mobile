@@ -1,14 +1,12 @@
 import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
-// import 'package:extended_image/extended_image.dart';
 import 'package:get/get.dart';
 import 'package:logger/logger.dart';
 import 'package:camera/camera.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:video_player/video_player.dart';
 import 'package:image/image.dart' as image_lib;
 import 'package:crop_your_image/crop_your_image.dart';
 import 'dart:convert';
@@ -25,7 +23,7 @@ class CameraView extends StatefulWidget {
 
   // const CameraExampleView({required this.availableCameras});
 
-  final availableCameras;
+  final List<CameraDescription> availableCameras;
 
   @override
   _CameraViewState createState() {
@@ -54,27 +52,11 @@ void logError(String code, String? message) {
     print('Error: $code');
   }
 }
-//
-// double normalize(double x,double a,double b){
-//   return (b-a)* (x-math.min(x))/(math.max(x)-math.min(x)) + a
-//
-// }
-
-// [ 240, 320 ]  og py img
-
-// (392.7, 583.0)   img inside renderbox shape
-
-// (392.7, 642.3)   renderbox shape
-
-// 583.0
 
 class _CameraViewState extends State<CameraView>
     with WidgetsBindingObserver, TickerProviderStateMixin {
-  CameraController? controller;
-  XFile? imageFile;
-  XFile? videoFile;
-  VideoPlayerController? videoController;
-  VoidCallback? videoPlayerListener;
+  CameraController? _controller;
+
   bool enableAudio = true;
   final cropController = CropController();
   GlobalKey cropAreaKey = GlobalKey();
@@ -87,18 +69,19 @@ class _CameraViewState extends State<CameraView>
   double _maxAvailableZoom = 1.0;
   double _currentScale = 1.0;
   double _baseScale = 1.0;
-  Uint8List? imgData;
   XFile? pictureTaken;
   String? imgLabel;
   // Counting pointers (number of user fingers on screen)
   int _pointers = 0;
   Rect? initialCropArea;
   List productData = [];
-
+  bool isLoading = false;
+  CameraLensDirection lenseDirection = CameraLensDirection.back;
+   late Future<void>  _initializeControllerFuture;
   @override
   void initState() {
     super.initState();
-    getAvailableCameras();
+
     _ambiguate(WidgetsBinding.instance)?.addObserver(this);
 
     _flashModeControlRowAnimationController = AnimationController(
@@ -118,14 +101,102 @@ class _CameraViewState extends State<CameraView>
       duration: const Duration(milliseconds: 300),
       vsync: this,
     );
+
+    // initialize camera
+    initCamera();
   }
 
-  Future<void> getAvailableCameras() async {
-    cameras = await widget.availableCameras;
-    // return cameras;
+  void initCamera() {
+    late final CameraDescription selectedCamera;
 
-    // var a =await widget.availableCameras();
-    print(cameras);
+    for (CameraDescription cameraDescription in widget.availableCameras) {
+      if (_controller != null &&
+          _controller!.value.isRecordingVideo &&
+          cameraDescription.lensDirection == lenseDirection) {
+        continue;
+      } else {
+        selectedCamera = cameraDescription;
+        break;
+      }
+    }
+
+    onNewCameraSelected(selectedCamera);
+  }
+
+  void onNewCameraSelected(CameraDescription cameraDescription) async {
+    final CameraController? oldController = _controller;
+    if (oldController != null) {
+      // `controller` needs to be set to null before getting disposed,
+      // to avoid a race condition when we use the controller that is being
+      // disposed. This happens when camera permission dialog shows up,
+      // which triggers `didChangeAppLifecycleState`, which disposes and
+      // re-creates the controller.
+      _controller = null;
+      await oldController.dispose();
+    }
+
+    final CameraController cameraController = CameraController(
+      cameraDescription,
+      kIsWeb ? ResolutionPreset.max : ResolutionPreset.medium,
+      // enableAudio: enableAudio,
+      imageFormatGroup: ImageFormatGroup.jpeg,
+    );
+
+    _controller = cameraController;
+
+    // If the controller is updated then update the UI.
+    cameraController.addListener(() {
+      if (mounted) setState(() {});
+      if (cameraController.value.hasError) {
+        showInSnackBar(
+            'Camera error ${cameraController.value.errorDescription}');
+      }
+    });
+
+    try {
+      _initializeControllerFuture =  cameraController.initialize();
+      await Future.wait(<Future<Object?>>[
+        // The exposure mode is currently not supported on the web.
+        ...!kIsWeb ? <Future<Object?>>[] : <Future<Object?>>[],
+        cameraController
+            .getMaxZoomLevel()
+            .then((double value) => _maxAvailableZoom = value),
+        cameraController
+            .getMinZoomLevel()
+            .then((double value) => _minAvailableZoom = value),
+      ]);
+    } on CameraException catch (e) {
+      switch (e.code) {
+        case 'CameraAccessDenied':
+          showInSnackBar('You have denied camera access.');
+          break;
+        case 'CameraAccessDeniedWithoutPrompt':
+          // iOS only
+          showInSnackBar('Please go to Settings app to enable camera access.');
+          break;
+        case 'CameraAccessRestricted':
+          // iOS only
+          showInSnackBar('Camera access is restricted.');
+          break;
+        case 'AudioAccessDenied':
+          showInSnackBar('You have denied audio access.');
+          break;
+        case 'AudioAccessDeniedWithoutPrompt':
+          // iOS only
+          showInSnackBar('Please go to Settings app to enable audio access.');
+          break;
+        case 'AudioAccessRestricted':
+          // iOS only
+          showInSnackBar('Audio access is restricted.');
+          break;
+        default:
+          _showCameraException(e);
+          break;
+      }
+    }
+    if (mounted) {
+      setState(() {});
+    }
   }
 
   @override
@@ -138,7 +209,7 @@ class _CameraViewState extends State<CameraView>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    final CameraController? cameraController = controller;
+    final CameraController? cameraController = _controller;
 
     // App state changed before we got the chance to initialize.
     if (cameraController == null || !cameraController.value.isInitialized) {
@@ -156,7 +227,7 @@ class _CameraViewState extends State<CameraView>
   List<CameraDescription> cameras = [];
   final logger = Logger();
 
-  String? getHealthCheck() {
+  getHealthCheck() {
     ApiService? api = context.read<ApiService?>();
     api?.getHealthCheck();
   }
@@ -165,7 +236,7 @@ class _CameraViewState extends State<CameraView>
     return base64Decode(base64String);
   }
 
-  Future<String> ImgDataToBase64(Uint8List file, {int? height}) async {
+  Future<String> imgDataToBase64(Uint8List file, {int? height}) async {
     final image = image_lib.decodeImage(await file)!;
     return base64Encode(image_lib.encodeJpg(image));
   }
@@ -180,27 +251,27 @@ class _CameraViewState extends State<CameraView>
     // double height = MediaQuery.of(context).size.height;
     // area of the Crop widget output that's actually the image and not the padding
     // double actualImgPercentage = 0.9076755410244435;
-    double actualImgPercentage = 1.2;
+    // double actualImgPercentage = 1.2;
 
     setState(() {
       imgLabel = null;
       productData.clear();
+      isLoading = true;
     });
     ApiService? api = context.read<ApiService?>();
 
-    final base64Img = await ImgDataToBase64(pictureTaken);
+    final base64Img = await imgDataToBase64(pictureTaken);
     final Map<String, dynamic>? res = await api?.postImage(base64Img);
 
     if (res != null) {
-      logger.d(res["label"]);
-      // logger.d(res["similar_products"]);
-
       String? label = res["title"];
-      String? outputImg = res["output_img"];
       List<dynamic> imShape = res["im_shape"];
-      logger.i(res["bounds"]);
-      logger.i(res["im_shape"]);
       List<dynamic> bounds = res["bounds"].map((v) => v.toDouble()).toList();
+
+      // logger.i(res["bounds"]);
+      // logger.i(res["im_shape"]);
+      // logger.i(res["label"]);
+      // logger.d(res["similar_products"]);
 
       setState(() {
         productData = res["similar_products"];
@@ -214,40 +285,17 @@ class _CameraViewState extends State<CameraView>
             final double xScaleFactor = box.size.width / imShape[1];
             final double yScaleFactor =
                 box.size.height / imShape[0]; // * actualImgPercentage;
-            logger.i(xScaleFactor);
-            logger.i(yScaleFactor);
-            logger.i(box.size);
-            // final pos = box.localToGlobal(Offset.zero);
-            // logger.i(box);
-            // logger.i(pos);
-            // logger.i(keyContext.size);
 
-            // logger.i(box.s
-            // ize.width);
-
-            // logger.i("width  height");
-            // logger.i(width);
-            // logger.i(height);
-
-            // double enlarge_factor = 1.3;
-            // double x_adjustment = box.size.width * 0.1;
 
             double x1 = bounds[0] * xScaleFactor;
             double x2 = bounds[2] * xScaleFactor;
 
-            // double y_adjustment =  box.size.width * 0.02;
             double y1 = bounds[1] * yScaleFactor;
             double y2 = bounds[3] * yScaleFactor;
 
-// for emulator
-//             double enlarge_factor = 1.3;
-//             double x_adjustment = box.size.width * 0.1;
-//             double x1 = math.max(bounds[0] - x_adjustment,box.size.width  );
-//             double x2 =  math.max(bounds[2] * enlarge_factor - x_adjustment,box.size.width  )  ;
-//
-//             // double y_adjustment =  box.size.width * 0.02;
-//             double y1 =  math.max(bounds[1],box.size.height) ;
-//             double y2 =  math.max(bounds[3] * enlarge_factor,box.size.height );
+            setState(() {
+              isLoading = false;
+            });
 
             cropController.rect = Rect.fromPoints(
                 Offset(
@@ -275,26 +323,18 @@ class _CameraViewState extends State<CameraView>
         });
       }
 
-      if (outputImg != null) {
-        logger.i(res["bounds"]);
-        setState(() {
-          imgData = _base64ToImgData(outputImg);
-        });
-      } else {
-        setState(() {
-          imgData = null;
-        });
-      }
+      setState(() {
+        isLoading = false;
+      });
     }
   }
 
   void onTakePictureButtonPressed() async {
     pictureTaken = await takePicture();
-    // setState(() {
-    //   cropController.rect = initialCropArea!;
-    // });
 
-    setState(() {});
+    setState(() {
+      isLoading = true;
+    });
     logger.d("Pic taken");
     if (pictureTaken != null) {
       _getDetection(await pictureTaken!.readAsBytes(), false);
@@ -318,12 +358,13 @@ class _CameraViewState extends State<CameraView>
 
     return Scaffold(
       key: _scaffoldKey,
-      floatingActionButton: _captureControlWidget(),
-      floatingActionButtonLocation: FloatingActionButtonLocation.centerFloat,
+      // floatingActionButton: ,
+      // floatingActionButtonLocation: FloatingActionButtonLocation.centerFloat,
       body: WillPopScope(
         onWillPop: () async {
           logger.w("Will pop scope");
           setState(() {
+            isLoading = false;
             pictureTaken = null;
           });
           return false;
@@ -333,7 +374,7 @@ class _CameraViewState extends State<CameraView>
           mainAxisSize: MainAxisSize.max,
           children: <Widget>[
             SizedBox(
-              height: size.height * .8,
+              height: size.height * .85,
               child: Stack(
                 alignment: Alignment.topCenter,
                 children: [
@@ -369,26 +410,22 @@ class _CameraViewState extends State<CameraView>
                             child: GridView.builder(
                               gridDelegate:
                                   const SliverGridDelegateWithMaxCrossAxisExtent(
-                                      maxCrossAxisExtent: 200,
-                                      // childAspectRatio: 3 / 2,
-                                      crossAxisSpacing: 5,
-                                      mainAxisSpacing: 5),
+                                      maxCrossAxisExtent: 250,
+                                      // childAspectRatio: 2/3,
+                                      crossAxisSpacing: 4,
+                                      mainAxisSpacing: 4),
                               controller: scrollController,
                               itemCount: productData.length,
                               itemBuilder: (BuildContext context, int index) {
-                                // logger.i(productData.runtimeType);
-                                // logger.i(productData);
-
                                 final Map<String, dynamic> prod =
                                     productData[index];
-
                                 final bool showImg = !prod["img"]
                                     .toString()
                                     .toLowerCase()
                                     .contains("missing_product");
 
                                 return Card(
-                                    elevation: 10,
+                                    elevation: 1,
                                     margin: const EdgeInsets.only(
                                         top: 5,
                                         left: 10,
@@ -398,15 +435,15 @@ class _CameraViewState extends State<CameraView>
                                       padding: const EdgeInsets.all(12.0),
                                       child: Column(
                                         children: [
-                                          Text(
-                                              "${index + 1}  " + prod["title"]),
+                                          Text("${index + 1}.  " +
+                                              prod["title"]),
                                           const SizedBox(
-                                            height: 10,
+                                            height: 20,
                                           ),
                                           showImg
                                               ? Image.network(
                                                   prod["img"],
-                                                  height: 70,
+                                                  height: 90,
                                                 )
                                               : Image.network(
                                                   "https://www.pnp.co.za" +
@@ -414,7 +451,7 @@ class _CameraViewState extends State<CameraView>
                                                           .toString()
                                                           .replaceAll("140x140",
                                                               "400x400"),
-                                                  height: 70,
+                                                  height: 90,
                                                 )
 
                                           // const FlutterLogo(
@@ -432,22 +469,26 @@ class _CameraViewState extends State<CameraView>
                 ],
               ),
             ),
-            Container(
-              // padding: EdgeInsets.all(2),
-              // margin: EdgeInsets.all(20),
+            if (imgLabel != null)
+              Container(
+                padding: EdgeInsets.all(2),
+                // margin: EdgeInsets.all(20),
 
-              color: Colors.red,
-              child: Text(imgLabel ?? ""),
+                color: Colors.red,
+                child: Text(imgLabel ?? ""),
+              ),
+
+            if (isLoading) LinearProgressIndicator(),
+
+            Container(
+              decoration:
+                  BoxDecoration(borderRadius: BorderRadius.circular(300)),
+              child: _captureControlWidget(),
             ),
 
-            _captureControlWidget(),
+            // _captureControlWidget(),
             // _modeControlRowWidget(),
-            _cameraTogglesRowWidget(),
-
-            // if (imgData != null)
-            //   Container(
-            //     child: imgData,
-            //   )
+            // _cameraTogglesRowWidget(),
           ],
         ),
       ),
@@ -455,97 +496,69 @@ class _CameraViewState extends State<CameraView>
   }
 
   Widget _buildCropWidget() {
-    return Container(
-      // decoration: BoxDecoration(
-      //   color: Colors.yellow
-      // ),
-      child: Crop(
-        key: cropAreaKey,
-        onCropped: onCropped,
-        image: File(pictureTaken!.path).readAsBytesSync(),
-
-        onMoved: (rect) {
-          logger.i(rect.toString());
-        },
-        // initialAreaBuilder: (rect)  {
-        //
-        //
-        //   return rect;
-        // },
-        //   logger.i(rect.toString());
-        //   return initialCropArea!;
-        //
-        // },
-        // radius: 40,
-        // initialArea: initialCropArea,
-        // baseColor: Colors.blue.shade900,
-        baseColor: Colors.white,
-
-        controller: cropController,
-      ),
+    return Crop(
+      key: cropAreaKey,
+      onCropped: onCropped,
+      image: File(pictureTaken!.path).readAsBytesSync(),
+      initialArea: Rect.zero,
+      // onMoved: (rect) {
+      //   // logger.i(rect.toString());
+      // },
+      baseColor: Colors.white,
+      controller: cropController,
     );
   }
 
-  /// Display the preview from the camera (or a message if the preview is not available).
   Widget _cameraPreviewWidget() {
-    final CameraController? cameraController = controller;
+    return FutureBuilder<void>(
+        future: _initializeControllerFuture,
+        builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.done &&
+              _controller != null) {
+            final scale = 1 /
+                (_controller!.value.aspectRatio *
+                    MediaQuery.of(context).size.aspectRatio);
 
-    if (cameraController == null || !cameraController.value.isInitialized) {
-      return const Text(
-        'Tap a camera',
-        style: TextStyle(
-          color: Colors.white,
-          fontSize: 24.0,
-          fontWeight: FontWeight.w900,
-        ),
-      );
-    } else {
-      // final size = MediaQuery.of(context).size;
-      // final aspectRation = controller!.value.aspectRatio;
-      // final deviceRatio = size.width / size.height;
-      final scale = 1 /
-          (controller!.value.aspectRatio *
-              MediaQuery.of(context).size.aspectRatio);
+            // If the Future is complete, display the preview.
+            return Listener(
+              onPointerDown: (_) => _pointers++,
+              onPointerUp: (_) => _pointers--,
+              child: Transform.scale(
+                scale: scale,
+                child: ClipRRect(
+                  borderRadius:
+                      const BorderRadius.vertical(bottom: Radius.circular(20)),
+                  child: CameraPreview(
+                    _controller!,
+                    child: LayoutBuilder(
+                      builder:
+                          (BuildContext context, BoxConstraints constraints) {
+                        return GestureDetector(
+                          behavior: HitTestBehavior.opaque,
+                          onScaleStart: _handleScaleStart,
+                          onScaleUpdate: _handleScaleUpdate,
+                          onTapDown: (details) =>
+                              onViewFinderTap(details, constraints),
+                        );
+                      },
+                    ),
+                  ),
+                ),
+              ),
+            );
+          } else {
+            return const Center(child: CircularProgressIndicator());
+          }
+        });
 
-      return Listener(
-        onPointerDown: (_) => _pointers++,
-        onPointerUp: (_) => _pointers--,
-        child: CameraPreview(
-          controller!,
-          child: LayoutBuilder(
-            builder: (BuildContext context, BoxConstraints constraints) {
-              return GestureDetector(
-                behavior: HitTestBehavior.opaque,
-                onScaleStart: _handleScaleStart,
-                onScaleUpdate: _handleScaleUpdate,
-                onTapDown: (details) => onViewFinderTap(details, constraints),
-              );
-            },
-          ),
-        ),
-      );
-
-      //
-      //   Transform.scale(
-      //     scale: scale,
-      //     child: ClipRRect(
-      //       borderRadius:
-      //           const BorderRadius.vertical(bottom: Radius.circular(20)),
-      //       child: ,
-      //     ),
-      //   ),
-      // );
-
-      //   child: Transform.scale(
-      //     scale: aspectRation / deviceRatio,
-      //     child: AspectRatio(
-      //       aspectRatio: aspectRation,
-      //       child: ,
-      //     ),
-      //   ),
-      // );
-
-    }
+    //   child: Transform.scale(
+    //     scale: aspectRation / deviceRatio,
+    //     child: AspectRatio(
+    //       aspectRatio: aspectRation,
+    //       child: ,
+    //     ),
+    //   ),
+    // );
   }
 
   void _handleScaleStart(ScaleStartDetails details) {
@@ -554,14 +567,14 @@ class _CameraViewState extends State<CameraView>
 
   Future<void> _handleScaleUpdate(ScaleUpdateDetails details) async {
     // When there are not exactly two fingers on screen don't scale
-    if (controller == null || _pointers != 2) {
+    if (_controller == null || _pointers != 2) {
       return;
     }
 
     _currentScale = (_baseScale * details.scale)
         .clamp(_minAvailableZoom, _maxAvailableZoom);
 
-    await controller!.setZoomLevel(_currentScale);
+    await _controller!.setZoomLevel(_currentScale);
   }
 
   /// Display a bar with buttons to change the flash and exposure modes
@@ -575,14 +588,14 @@ class _CameraViewState extends State<CameraView>
             IconButton(
               icon: const Icon(Icons.flash_on),
               color: Colors.blue,
-              onPressed: controller != null ? onFlashModeButtonPressed : null,
+              onPressed: _controller != null ? onFlashModeButtonPressed : null,
             ),
             IconButton(
-              icon: Icon(controller?.value.isCaptureOrientationLocked ?? false
+              icon: Icon(_controller?.value.isCaptureOrientationLocked ?? false
                   ? Icons.screen_lock_rotation
                   : Icons.screen_rotation),
               color: Colors.blue,
-              onPressed: controller != null
+              onPressed: _controller != null
                   ? onCaptureOrientationLockButtonPressed
                   : null,
             ),
@@ -603,37 +616,37 @@ class _CameraViewState extends State<CameraView>
           children: [
             IconButton(
               icon: const Icon(Icons.flash_off),
-              color: controller?.value.flashMode == FlashMode.off
+              color: _controller?.value.flashMode == FlashMode.off
                   ? Colors.orange
                   : Colors.blue,
-              onPressed: controller != null
+              onPressed: _controller != null
                   ? () => onSetFlashModeButtonPressed(FlashMode.off)
                   : null,
             ),
             IconButton(
               icon: const Icon(Icons.flash_auto),
-              color: controller?.value.flashMode == FlashMode.auto
+              color: _controller?.value.flashMode == FlashMode.auto
                   ? Colors.orange
                   : Colors.blue,
-              onPressed: controller != null
+              onPressed: _controller != null
                   ? () => onSetFlashModeButtonPressed(FlashMode.auto)
                   : null,
             ),
             IconButton(
               icon: const Icon(Icons.flash_on),
-              color: controller?.value.flashMode == FlashMode.always
+              color: _controller?.value.flashMode == FlashMode.always
                   ? Colors.orange
                   : Colors.blue,
-              onPressed: controller != null
+              onPressed: _controller != null
                   ? () => onSetFlashModeButtonPressed(FlashMode.always)
                   : null,
             ),
             IconButton(
               icon: const Icon(Icons.highlight),
-              color: controller?.value.flashMode == FlashMode.torch
+              color: _controller?.value.flashMode == FlashMode.torch
                   ? Colors.orange
                   : Colors.blue,
-              onPressed: controller != null
+              onPressed: _controller != null
                   ? () => onSetFlashModeButtonPressed(FlashMode.torch)
                   : null,
             ),
@@ -645,12 +658,12 @@ class _CameraViewState extends State<CameraView>
 
   /// Display the control bar with buttons to take pictures and record videos.
   FloatingActionButton _captureControlWidget() {
-    final CameraController? cameraController = controller;
+    final CameraController? cameraController = _controller;
 
     return pictureTaken == null
         ? FloatingActionButton(
             child: const Icon(Icons.camera_alt),
-            // color: Colors.blue,
+
             onPressed: cameraController != null &&
                     cameraController.value.isInitialized &&
                     !cameraController.value.isRecordingVideo
@@ -658,74 +671,74 @@ class _CameraViewState extends State<CameraView>
                 : null,
           )
         : FloatingActionButton(
-            onPressed: () {
-              cropController.crop();
-              // setState(() {
-              //   double width = MediaQuery.of(context).size.width;
-              //   double height = MediaQuery.of(context).size.height;
-
-              // final Image img =  Image.memory(File(pictureTaken!.path).readAsBytesSync(),);
-              // logger.i(img.image);
-              // logger.i(img.width);
-
-              // Rect.fromPoints(Offset(width * 0.5, height * .5), Offset(width * 0.5, height * .5));
-              //     .fromCenter(
-              //     center: Offset(width * 0.5, height * .5),
-              //     width: 30,
-              //     height: 40
-              // );
-              // }
-              // );
-            }, // ,
+            onPressed: () => cropController.crop(), // ,
             child: const Icon(Icons.search),
           );
   }
 
+  // Widget _selectGoodCamera() {}
+
   /// Display a row of toggle to select the camera (or a message if no camera is available).
-  Widget _cameraTogglesRowWidget() {
-    final List<Widget> toggles = <Widget>[];
-
-    void onChanged(CameraDescription? description) {
-      if (description == null) {
-        return;
-      }
-      setState(() {
-        pictureTaken = null;
-      });
-      onNewCameraSelected(description);
-    }
-
-    if (widget.availableCameras.isEmpty) {
-      return const Text('No camera found');
-    } else {
-      // for (CameraDescription cameraDescription in widget.availableCameras) {
-      //   controller != null && controller!.value.isRecordingVideo
-      //                   ? null
-      //                   :  onChanged(cameraDescription);
-      //   break;
-      // }
-
-      // dynamically generate list of available cameras
-      for (CameraDescription cameraDescription in widget.availableCameras) {
-        toggles.add(
-          SizedBox(
-            width: 90.0,
-            child: RadioListTile<CameraDescription>(
-              title: Icon(getCameraLensIcon(cameraDescription.lensDirection)),
-              groupValue: controller?.description,
-              value: cameraDescription,
-              onChanged:
-                  controller != null && controller!.value.isRecordingVideo
-                      ? null
-                      : onChanged,
-            ),
-          ),
-        );
-      }
-    }
-
-    return Row(mainAxisSize: MainAxisSize.min, children: toggles);
-  }
+  // Widget _cameraTogglesRowWidget() {
+  //   final List<Widget> toggles = <Widget>[];
+  //   late final CameraDescription selectedCamera;
+  //
+  //   void onChanged(CameraDescription? description) {
+  //     if (description == null) {
+  //       return;
+  //     }
+  //     setState(() {
+  //       pictureTaken = null;
+  //     });
+  //     onNewCameraSelected(description);
+  //   }
+  //
+  //   if (widget.availableCameras.isEmpty) {
+  //     return const Center(child: Text('No camera found'));
+  //   } else {
+  //     // find good camera
+  //     for (CameraDescription cameraDescription in widget.availableCameras) {
+  //       if (_controller != null &&
+  //           _controller!.value.isRecordingVideo &&
+  //           cameraDescription.lensDirection == lenseDirection) {
+  //         continue;
+  //       } else {
+  //         selectedCamera = cameraDescription;
+  //         break;
+  //       }
+  //     }
+  //
+  //     onChanged(selectedCamera);
+  //
+  //     // dynamically generate list of available cameras
+  //     // for (CameraDescription cameraDescription in widget.availableCameras) {
+  //     //   logger.i(cameraDescription.name);
+  //     //   logger.i(cameraDescription.lensDirection);
+  //     //   logger.i(cameraDescription.sensorOrientation);
+  //     //   logger.i(cameraDescription.toString());
+  //
+  //
+  //
+  //
+  //     // toggles.add(
+  //     //   SizedBox(
+  //     //     width: 70.0,
+  //     //     child: RadioListTile<CameraDescription>(
+  //     //       title: Icon(getCameraLensIcon(cameraDescription.lensDirection)),
+  //     //       groupValue: controller?.description,
+  //     //       value: cameraDescription,
+  //     //       onChanged:
+  //     //           controller != null && controller!.value.isRecordingVideo
+  //     //               ? null
+  //     //               : onChanged,
+  //     //     ),
+  //     //   ),
+  //     // );
+  //     // }
+  //   }
+  //
+  //   return Row(mainAxisSize: MainAxisSize.min, children: []);
+  // }
 
   String timestamp() => DateTime.now().millisecondsSinceEpoch.toString();
 
@@ -735,11 +748,11 @@ class _CameraViewState extends State<CameraView>
   }
 
   void onViewFinderTap(TapDownDetails details, BoxConstraints constraints) {
-    if (controller == null) {
+    if (_controller == null) {
       return;
     }
 
-    final CameraController cameraController = controller!;
+    final CameraController cameraController = _controller!;
 
     final offset = Offset(
       details.localPosition.dx / constraints.maxWidth,
@@ -747,59 +760,6 @@ class _CameraViewState extends State<CameraView>
     );
     cameraController.setExposurePoint(offset);
     cameraController.setFocusPoint(offset);
-  }
-
-  void onNewCameraSelected(CameraDescription cameraDescription) async {
-    if (controller != null) {
-      await controller!.dispose();
-    }
-
-    final CameraController cameraController = CameraController(
-      cameraDescription,
-      kIsWeb ? ResolutionPreset.max : ResolutionPreset.medium,
-      enableAudio: enableAudio,
-      imageFormatGroup: ImageFormatGroup.jpeg,
-    );
-
-    controller = cameraController;
-
-    // If the controller is updated then update the UI.
-    cameraController.addListener(() {
-      if (mounted) setState(() {});
-      if (cameraController.value.hasError) {
-        showInSnackBar(
-            'Camera error ${cameraController.value.errorDescription}');
-      }
-    });
-
-    try {
-      await cameraController.initialize();
-      await Future.wait([
-        // The exposure mode is currently not supported on the web.
-        // ...(!kIsWeb
-        //     ? [
-        //         cameraController
-        //             .getMinExposureOffset()
-        //             .then((value) => _minAvailableExposureOffset = value),
-        //         cameraController
-        //             .getMaxExposureOffset()
-        //             .then((value) => _maxAvailableExposureOffset = value)
-        //       ]
-        //     : []),
-        cameraController
-            .getMaxZoomLevel()
-            .then((value) => _maxAvailableZoom = value),
-        cameraController
-            .getMinZoomLevel()
-            .then((value) => _minAvailableZoom = value),
-      ]);
-    } on CameraException catch (e) {
-      _showCameraException(e);
-    }
-
-    if (mounted) {
-      setState(() {});
-    }
   }
 
   void onFlashModeButtonPressed() {
@@ -821,8 +781,8 @@ class _CameraViewState extends State<CameraView>
 
   void onCaptureOrientationLockButtonPressed() async {
     try {
-      if (controller != null) {
-        final CameraController cameraController = controller!;
+      if (_controller != null) {
+        final CameraController cameraController = _controller!;
         if (cameraController.value.isCaptureOrientationLocked) {
           await cameraController.unlockCaptureOrientation();
           showInSnackBar('Capture orientation unlocked');
@@ -838,12 +798,12 @@ class _CameraViewState extends State<CameraView>
   }
 
   Future<void> setFlashMode(FlashMode mode) async {
-    if (controller == null) {
+    if (_controller == null) {
       return;
     }
 
     try {
-      await controller!.setFlashMode(mode);
+      await _controller!.setFlashMode(mode);
     } on CameraException catch (e) {
       _showCameraException(e);
       rethrow;
@@ -851,12 +811,12 @@ class _CameraViewState extends State<CameraView>
   }
 
   Future<void> setFocusMode(FocusMode mode) async {
-    if (controller == null) {
+    if (_controller == null) {
       return;
     }
 
     try {
-      await controller!.setFocusMode(mode);
+      await _controller!.setFocusMode(mode);
     } on CameraException catch (e) {
       _showCameraException(e);
       rethrow;
@@ -864,7 +824,7 @@ class _CameraViewState extends State<CameraView>
   }
 
   Future<XFile?> takePicture() async {
-    final CameraController? cameraController = controller;
+    final CameraController? cameraController = _controller;
     if (cameraController == null || !cameraController.value.isInitialized) {
       showInSnackBar('Error: select a camera first.');
       return null;
