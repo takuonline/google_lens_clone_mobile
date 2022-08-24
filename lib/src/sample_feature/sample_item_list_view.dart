@@ -36,10 +36,9 @@ class _SampleItemListViewState extends State<SampleItemListView> {
   final logger = Logger();
 
   String? getHealthCheck() {
-    ApiService? api = context.read<ApiService?>();
-    api?.getHealthCheck();
+    ApiService api = ApiService();
+    api.getHealthCheck();
   }
-
 
   @override
   Widget build(BuildContext context) {

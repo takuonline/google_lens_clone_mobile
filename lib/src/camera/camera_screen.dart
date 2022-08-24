@@ -13,6 +13,9 @@ import 'dart:convert';
 import '../networking/api.dart';
 import 'dart:math' as math;
 
+import '../styles/size_config.dart';
+import 'camera_provider.dart';
+
 class CameraView extends StatefulWidget {
   static const routeName = "/camera";
 
@@ -55,18 +58,15 @@ void logError(String code, String? message) {
 
 class _CameraViewState extends State<CameraView>
     with WidgetsBindingObserver, TickerProviderStateMixin {
-  CameraController? _controller;
-
   bool enableAudio = true;
   final cropController = CropController();
   GlobalKey cropAreaKey = GlobalKey();
+  final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
 
   late AnimationController _flashModeControlRowAnimationController;
   late Animation<double> _flashModeControlRowAnimation;
   late AnimationController _exposureModeControlRowAnimationController;
   late AnimationController _focusModeControlRowAnimationController;
-  double _minAvailableZoom = 1.0;
-  double _maxAvailableZoom = 1.0;
   double _currentScale = 1.0;
   double _baseScale = 1.0;
   XFile? pictureTaken;
@@ -76,8 +76,9 @@ class _CameraViewState extends State<CameraView>
   Rect? initialCropArea;
   List productData = [];
   bool isLoading = false;
+
   CameraLensDirection lenseDirection = CameraLensDirection.back;
-   late Future<void>  _initializeControllerFuture;
+  late Future<void> _initializeControllerFuture;
   @override
   void initState() {
     super.initState();
@@ -107,11 +108,12 @@ class _CameraViewState extends State<CameraView>
   }
 
   void initCamera() {
+    final CameraProvider model = context.read<CameraProvider>();
     late final CameraDescription selectedCamera;
 
     for (CameraDescription cameraDescription in widget.availableCameras) {
-      if (_controller != null &&
-          _controller!.value.isRecordingVideo &&
+      if (model.controller != null &&
+          model.controller!.value.isRecordingVideo &&
           cameraDescription.lensDirection == lenseDirection) {
         continue;
       } else {
@@ -120,87 +122,14 @@ class _CameraViewState extends State<CameraView>
       }
     }
 
-    onNewCameraSelected(selectedCamera);
-  }
-
-  void onNewCameraSelected(CameraDescription cameraDescription) async {
-    final CameraController? oldController = _controller;
-    if (oldController != null) {
-      // `controller` needs to be set to null before getting disposed,
-      // to avoid a race condition when we use the controller that is being
-      // disposed. This happens when camera permission dialog shows up,
-      // which triggers `didChangeAppLifecycleState`, which disposes and
-      // re-creates the controller.
-      _controller = null;
-      await oldController.dispose();
-    }
-
-    final CameraController cameraController = CameraController(
-      cameraDescription,
-      kIsWeb ? ResolutionPreset.max : ResolutionPreset.medium,
-      // enableAudio: enableAudio,
-      imageFormatGroup: ImageFormatGroup.jpeg,
-    );
-
-    _controller = cameraController;
-
-    // If the controller is updated then update the UI.
-    cameraController.addListener(() {
-      if (mounted) setState(() {});
-      if (cameraController.value.hasError) {
-        showInSnackBar(
-            'Camera error ${cameraController.value.errorDescription}');
-      }
-    });
-
-    try {
-      _initializeControllerFuture =  cameraController.initialize();
-      await Future.wait(<Future<Object?>>[
-        // The exposure mode is currently not supported on the web.
-        ...!kIsWeb ? <Future<Object?>>[] : <Future<Object?>>[],
-        cameraController
-            .getMaxZoomLevel()
-            .then((double value) => _maxAvailableZoom = value),
-        cameraController
-            .getMinZoomLevel()
-            .then((double value) => _minAvailableZoom = value),
-      ]);
-    } on CameraException catch (e) {
-      switch (e.code) {
-        case 'CameraAccessDenied':
-          showInSnackBar('You have denied camera access.');
-          break;
-        case 'CameraAccessDeniedWithoutPrompt':
-          // iOS only
-          showInSnackBar('Please go to Settings app to enable camera access.');
-          break;
-        case 'CameraAccessRestricted':
-          // iOS only
-          showInSnackBar('Camera access is restricted.');
-          break;
-        case 'AudioAccessDenied':
-          showInSnackBar('You have denied audio access.');
-          break;
-        case 'AudioAccessDeniedWithoutPrompt':
-          // iOS only
-          showInSnackBar('Please go to Settings app to enable audio access.');
-          break;
-        case 'AudioAccessRestricted':
-          // iOS only
-          showInSnackBar('Audio access is restricted.');
-          break;
-        default:
-          _showCameraException(e);
-          break;
-      }
-    }
-    if (mounted) {
-      setState(() {});
-    }
+    model.onNewCameraSelected(selectedCamera);
   }
 
   @override
   void dispose() {
+    final CameraProvider model = context.read<CameraProvider>();
+    model.setDisposed();
+
     _ambiguate(WidgetsBinding.instance)?.removeObserver(this);
     _flashModeControlRowAnimationController.dispose();
     _exposureModeControlRowAnimationController.dispose();
@@ -209,7 +138,9 @@ class _CameraViewState extends State<CameraView>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    final CameraController? cameraController = _controller;
+    final CameraProvider model = context.read<CameraProvider>();
+
+    final CameraController? cameraController = model.controller;
 
     // App state changed before we got the chance to initialize.
     if (cameraController == null || !cameraController.value.isInitialized) {
@@ -219,17 +150,16 @@ class _CameraViewState extends State<CameraView>
     if (state == AppLifecycleState.inactive) {
       cameraController.dispose();
     } else if (state == AppLifecycleState.resumed) {
-      onNewCameraSelected(cameraController.description);
+      model.onNewCameraSelected(cameraController.description);
     }
   }
 
-  final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
   List<CameraDescription> cameras = [];
   final logger = Logger();
 
   getHealthCheck() {
-    ApiService? api = context.read<ApiService?>();
-    api?.getHealthCheck();
+    ApiService api = ApiService();
+    api.getHealthCheck();
   }
 
   Uint8List _base64ToImgData(String base64String) {
@@ -258,20 +188,17 @@ class _CameraViewState extends State<CameraView>
       productData.clear();
       isLoading = true;
     });
-    ApiService? api = context.read<ApiService?>();
+    ApiService api = ApiService();
 
     final base64Img = await imgDataToBase64(pictureTaken);
-    final Map<String, dynamic>? res = await api?.postImage(base64Img);
+    final Map<String, dynamic>? res = await api.postImage(base64Img);
 
     if (res != null) {
-      String? label = res["title"];
+      String label = res["is_crop"] == false ? res["title"] : "";
       List<dynamic> imShape = res["im_shape"];
       List<dynamic> bounds = res["bounds"].map((v) => v.toDouble()).toList();
 
-      // logger.i(res["bounds"]);
-      // logger.i(res["im_shape"]);
-      // logger.i(res["label"]);
-      // logger.d(res["similar_products"]);
+      logger.d(res["similar_products"]);
 
       setState(() {
         productData = res["similar_products"];
@@ -285,7 +212,6 @@ class _CameraViewState extends State<CameraView>
             final double xScaleFactor = box.size.width / imShape[1];
             final double yScaleFactor =
                 box.size.height / imShape[0]; // * actualImgPercentage;
-
 
             double x1 = bounds[0] * xScaleFactor;
             double x2 = bounds[2] * xScaleFactor;
@@ -326,6 +252,12 @@ class _CameraViewState extends State<CameraView>
       setState(() {
         isLoading = false;
       });
+    } else {
+      setState(() {
+        isLoading = false;
+      });
+      _showInSnackBar(
+          "Could not connect to backend, please check you network and try again");
     }
   }
 
@@ -350,22 +282,35 @@ class _CameraViewState extends State<CameraView>
     // }
   }
 
+  void _showInSnackBar(
+    String message,
+  ) {
+    // ignore: deprecated_member_use
+    _scaffoldKey.currentState?.showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  void _showCameraException(CameraException e) {
+    logger.e(e.code, e.description);
+    _showInSnackBar('Error: ${e.code}\n${e.description}');
+  }
+
   @override
   Widget build(BuildContext context) {
+    SizeConfig.init(context);
     MediaQueryData queryData;
     queryData = MediaQuery.of(context);
     final size = queryData.size;
 
     return Scaffold(
       key: _scaffoldKey,
-      // floatingActionButton: ,
-      // floatingActionButtonLocation: FloatingActionButtonLocation.centerFloat,
       body: WillPopScope(
         onWillPop: () async {
           logger.w("Will pop scope");
           setState(() {
             isLoading = false;
             pictureTaken = null;
+            productData.clear();
+            imgLabel = null;
           });
           return false;
         },
@@ -387,11 +332,6 @@ class _CameraViewState extends State<CameraView>
                           child: _cameraPreviewWidget(),
                         )
                       : _buildCropWidget(),
-
-                  // if (pictureTaken != null
-                  // // && initialCropArea != null
-                  // ) _buildCropWidget(),
-
                   if (pictureTaken != null && productData.isNotEmpty)
                     SizedBox.expand(
                       child: DraggableScrollableSheet(
@@ -435,15 +375,17 @@ class _CameraViewState extends State<CameraView>
                                       padding: const EdgeInsets.all(12.0),
                                       child: Column(
                                         children: [
-                                          Text("${index + 1}.  " +
-                                              prod["title"]),
-                                          const SizedBox(
-                                            height: 20,
+                                          Text(
+                                            "${index + 1}.  " + prod["title"],
+                                            maxLines: 3,
                                           ),
+                                          Spacer(),
                                           showImg
                                               ? Image.network(
                                                   prod["img"],
-                                                  height: 90,
+                                                  height: SizeConfig
+                                                          .safeBlockVertical *
+                                                      12,
                                                 )
                                               : Image.network(
                                                   "https://www.pnp.co.za" +
@@ -453,10 +395,6 @@ class _CameraViewState extends State<CameraView>
                                                               "400x400"),
                                                   height: 90,
                                                 )
-
-                                          // const FlutterLogo(
-                                          //         size: 50,
-                                          //       )
                                         ],
                                       ),
                                     ));
@@ -510,55 +448,55 @@ class _CameraViewState extends State<CameraView>
   }
 
   Widget _cameraPreviewWidget() {
-    return FutureBuilder<void>(
-        future: _initializeControllerFuture,
-        builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.done &&
-              _controller != null) {
-            final scale = 1 /
-                (_controller!.value.aspectRatio *
-                    MediaQuery.of(context).size.aspectRatio);
+    return Consumer<CameraProvider>(
+      builder: (context, model, child) {
+        return FutureBuilder<void>(
+            future: context.watch<CameraProvider>().initializeControllerFuture,
+            builder: (context, snapshot) {
+              if (snapshot.connectionState == ConnectionState.done &&
+                  model.controller != null) {
+                final scale = 1 /
+                    (model.controller!.value.aspectRatio *
+                        MediaQuery.of(context).size.aspectRatio);
 
-            // If the Future is complete, display the preview.
-            return Listener(
-              onPointerDown: (_) => _pointers++,
-              onPointerUp: (_) => _pointers--,
-              child: Transform.scale(
-                scale: scale,
-                child: ClipRRect(
-                  borderRadius:
-                      const BorderRadius.vertical(bottom: Radius.circular(20)),
-                  child: CameraPreview(
-                    _controller!,
-                    child: LayoutBuilder(
-                      builder:
-                          (BuildContext context, BoxConstraints constraints) {
-                        return GestureDetector(
-                          behavior: HitTestBehavior.opaque,
-                          onScaleStart: _handleScaleStart,
-                          onScaleUpdate: _handleScaleUpdate,
-                          onTapDown: (details) =>
-                              onViewFinderTap(details, constraints),
-                        );
-                      },
+                // If the Future is complete, display the preview.
+                return Listener(
+                    onPointerDown: (_) => _pointers++,
+                    onPointerUp: (_) => _pointers--,
+                    child: ClipRRect(
+                      borderRadius: const BorderRadius.vertical(
+                          bottom: Radius.circular(20)),
+                      child: CameraPreview(
+                        model.controller!,
+                        child: LayoutBuilder(
+                          builder: (BuildContext context,
+                              BoxConstraints constraints) {
+                            return GestureDetector(
+                              behavior: HitTestBehavior.opaque,
+                              onScaleStart: _handleScaleStart,
+                              onScaleUpdate: _handleScaleUpdate,
+                              onTapDown: (details) =>
+                                  onViewFinderTap(details, constraints),
+                            );
+                          },
+                        ),
+                      ),
                     ),
-                  ),
-                ),
-              ),
-            );
-          } else {
-            return const Center(child: CircularProgressIndicator());
-          }
-        });
+                );
 
-    //   child: Transform.scale(
-    //     scale: aspectRation / deviceRatio,
-    //     child: AspectRatio(
-    //       aspectRatio: aspectRation,
-    //       child: ,
-    //     ),
-    //   ),
-    // );
+                //   Transform.scale(
+                //     scale: scale,
+                //     child: ,
+                //   ),
+                // );
+                //
+
+              } else {
+                return const Center(child: CircularProgressIndicator());
+              }
+            });
+      },
+    );
   }
 
   void _handleScaleStart(ScaleStartDetails details) {
@@ -566,15 +504,20 @@ class _CameraViewState extends State<CameraView>
   }
 
   Future<void> _handleScaleUpdate(ScaleUpdateDetails details) async {
+    final model = context.read<CameraProvider>();
+
     // When there are not exactly two fingers on screen don't scale
-    if (_controller == null || _pointers != 2) {
+    if (context.watch<CameraProvider>().controller == null || _pointers != 2) {
       return;
     }
 
     _currentScale = (_baseScale * details.scale)
-        .clamp(_minAvailableZoom, _maxAvailableZoom);
+        .clamp(model.minAvailableZoom, model.maxAvailableZoom);
 
-    await _controller!.setZoomLevel(_currentScale);
+    await context
+        .watch<CameraProvider>()
+        .controller!
+        .setZoomLevel(_currentScale);
   }
 
   /// Display a bar with buttons to change the flash and exposure modes
@@ -588,14 +531,21 @@ class _CameraViewState extends State<CameraView>
             IconButton(
               icon: const Icon(Icons.flash_on),
               color: Colors.blue,
-              onPressed: _controller != null ? onFlashModeButtonPressed : null,
+              onPressed: context.watch<CameraProvider>().controller != null
+                  ? onFlashModeButtonPressed
+                  : null,
             ),
             IconButton(
-              icon: Icon(_controller?.value.isCaptureOrientationLocked ?? false
+              icon: Icon(context
+                          .watch<CameraProvider>()
+                          .controller
+                          ?.value
+                          .isCaptureOrientationLocked ??
+                      false
                   ? Icons.screen_lock_rotation
                   : Icons.screen_rotation),
               color: Colors.blue,
-              onPressed: _controller != null
+              onPressed: context.watch<CameraProvider>().controller != null
                   ? onCaptureOrientationLockButtonPressed
                   : null,
             ),
@@ -607,6 +557,7 @@ class _CameraViewState extends State<CameraView>
   }
 
   Widget _flashModeControlRowWidget() {
+    final _controller = context.watch<CameraProvider>().controller;
     return SizeTransition(
       sizeFactor: _flashModeControlRowAnimation,
       child: ClipRect(
@@ -657,102 +608,38 @@ class _CameraViewState extends State<CameraView>
   }
 
   /// Display the control bar with buttons to take pictures and record videos.
-  FloatingActionButton _captureControlWidget() {
-    final CameraController? cameraController = _controller;
+  Widget _captureControlWidget() {
+    final CameraController? cameraController =
+        context.watch<CameraProvider>().controller;
+    final double fabBtnSize = SizeConfig.safeBlockHorizontal * 18;
+    return SizedBox(
+      height: fabBtnSize,
+      width: fabBtnSize,
+      child: FittedBox(
+        child: FloatingActionButton(
+          child: Icon(Icons.search, size: SizeConfig.safeBlockHorizontal * 7),
+          onPressed: pictureTaken == null
+              ? (cameraController != null &&
+                      cameraController.value.isInitialized &&
+                      !cameraController.value.isRecordingVideo
+                  ? onTakePictureButtonPressed
+                  : null)
+              : () => cropController.crop(),
 
-    return pictureTaken == null
-        ? FloatingActionButton(
-            child: const Icon(Icons.camera_alt),
-
-            onPressed: cameraController != null &&
-                    cameraController.value.isInitialized &&
-                    !cameraController.value.isRecordingVideo
-                ? onTakePictureButtonPressed
-                : null,
-          )
-        : FloatingActionButton(
-            onPressed: () => cropController.crop(), // ,
-            child: const Icon(Icons.search),
-          );
-  }
-
-  // Widget _selectGoodCamera() {}
-
-  /// Display a row of toggle to select the camera (or a message if no camera is available).
-  // Widget _cameraTogglesRowWidget() {
-  //   final List<Widget> toggles = <Widget>[];
-  //   late final CameraDescription selectedCamera;
-  //
-  //   void onChanged(CameraDescription? description) {
-  //     if (description == null) {
-  //       return;
-  //     }
-  //     setState(() {
-  //       pictureTaken = null;
-  //     });
-  //     onNewCameraSelected(description);
-  //   }
-  //
-  //   if (widget.availableCameras.isEmpty) {
-  //     return const Center(child: Text('No camera found'));
-  //   } else {
-  //     // find good camera
-  //     for (CameraDescription cameraDescription in widget.availableCameras) {
-  //       if (_controller != null &&
-  //           _controller!.value.isRecordingVideo &&
-  //           cameraDescription.lensDirection == lenseDirection) {
-  //         continue;
-  //       } else {
-  //         selectedCamera = cameraDescription;
-  //         break;
-  //       }
-  //     }
-  //
-  //     onChanged(selectedCamera);
-  //
-  //     // dynamically generate list of available cameras
-  //     // for (CameraDescription cameraDescription in widget.availableCameras) {
-  //     //   logger.i(cameraDescription.name);
-  //     //   logger.i(cameraDescription.lensDirection);
-  //     //   logger.i(cameraDescription.sensorOrientation);
-  //     //   logger.i(cameraDescription.toString());
-  //
-  //
-  //
-  //
-  //     // toggles.add(
-  //     //   SizedBox(
-  //     //     width: 70.0,
-  //     //     child: RadioListTile<CameraDescription>(
-  //     //       title: Icon(getCameraLensIcon(cameraDescription.lensDirection)),
-  //     //       groupValue: controller?.description,
-  //     //       value: cameraDescription,
-  //     //       onChanged:
-  //     //           controller != null && controller!.value.isRecordingVideo
-  //     //               ? null
-  //     //               : onChanged,
-  //     //     ),
-  //     //   ),
-  //     // );
-  //     // }
-  //   }
-  //
-  //   return Row(mainAxisSize: MainAxisSize.min, children: []);
-  // }
-
-  String timestamp() => DateTime.now().millisecondsSinceEpoch.toString();
-
-  void showInSnackBar(String message) {
-    // ignore: deprecated_member_use
-    _scaffoldKey.currentState?.showSnackBar(SnackBar(content: Text(message)));
+          // onPressed:getHealthCheck
+        ),
+      ),
+    );
   }
 
   void onViewFinderTap(TapDownDetails details, BoxConstraints constraints) {
+    final _controller = context.watch<CameraProvider>().controller;
+
     if (_controller == null) {
       return;
     }
 
-    final CameraController cameraController = _controller!;
+    final CameraController cameraController = _controller;
 
     final offset = Offset(
       details.localPosition.dx / constraints.maxWidth,
@@ -773,22 +660,25 @@ class _CameraViewState extends State<CameraView>
   }
 
   void onSetFlashModeButtonPressed(FlashMode mode) {
+    final CameraProvider model = context.read<CameraProvider>();
     setFlashMode(mode).then((_) {
       if (mounted) setState(() {});
-      showInSnackBar('Flash mode set to ${mode.toString().split('.').last}');
+      _showInSnackBar('Flash mode set to ${mode.toString().split('.').last}');
     });
   }
 
   void onCaptureOrientationLockButtonPressed() async {
+    final _controller = context.watch<CameraProvider>().controller;
+
     try {
       if (_controller != null) {
-        final CameraController cameraController = _controller!;
+        final CameraController cameraController = _controller;
         if (cameraController.value.isCaptureOrientationLocked) {
           await cameraController.unlockCaptureOrientation();
-          showInSnackBar('Capture orientation unlocked');
+          _showInSnackBar('Capture orientation unlocked');
         } else {
           await cameraController.lockCaptureOrientation();
-          showInSnackBar(
+          _showInSnackBar(
               'Capture orientation locked to ${cameraController.value.lockedCaptureOrientation.toString().split('.').last}');
         }
       }
@@ -798,12 +688,14 @@ class _CameraViewState extends State<CameraView>
   }
 
   Future<void> setFlashMode(FlashMode mode) async {
+    final _controller = context.watch<CameraProvider>().controller;
+
     if (_controller == null) {
       return;
     }
 
     try {
-      await _controller!.setFlashMode(mode);
+      await _controller.setFlashMode(mode);
     } on CameraException catch (e) {
       _showCameraException(e);
       rethrow;
@@ -811,12 +703,14 @@ class _CameraViewState extends State<CameraView>
   }
 
   Future<void> setFocusMode(FocusMode mode) async {
+    final _controller = context.watch<CameraProvider>().controller;
+
     if (_controller == null) {
       return;
     }
 
     try {
-      await _controller!.setFocusMode(mode);
+      await _controller.setFocusMode(mode);
     } on CameraException catch (e) {
       _showCameraException(e);
       rethrow;
@@ -824,9 +718,10 @@ class _CameraViewState extends State<CameraView>
   }
 
   Future<XFile?> takePicture() async {
-    final CameraController? cameraController = _controller;
+    final CameraController? cameraController =
+        context.read<CameraProvider>().controller;
     if (cameraController == null || !cameraController.value.isInitialized) {
-      showInSnackBar('Error: select a camera first.');
+      _showInSnackBar('Error: select a camera first.');
       return null;
     }
 
@@ -842,11 +737,6 @@ class _CameraViewState extends State<CameraView>
       _showCameraException(e);
       return null;
     }
-  }
-
-  void _showCameraException(CameraException e) {
-    logError(e.code, e.description);
-    showInSnackBar('Error: ${e.code}\n${e.description}');
   }
 }
 
