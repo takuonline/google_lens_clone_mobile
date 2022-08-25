@@ -19,7 +19,7 @@ class ApiService {
 
   final dioOptions = BaseOptions(
       baseUrl: "http://10.0.2.2:8000",
-      // baseUrl: "http://34.241.9.189:8000",
+      // baseUrl: "http://54.170.227.68:8000",
       connectTimeout: 15000,
       receiveTimeout: 15000,
       headers: {
@@ -32,25 +32,29 @@ class ApiService {
     logger.i("Checking health dio");
     Response response;
     Dio dio = Dio(dioOptions);
-    response = await dio.get(  '/');
+    response = await dio.get('/');
     logger.d(response.statusCode);
     logger.d(response.data.toString());
   }
 
-  Future<Map<String, dynamic>?> postImage(String imgData) async {
+  Future<Map<String, dynamic>?> postImage(
+      String imgData, bool isUserFineTuned) async {
+    Map<String, dynamic> data;
+
     Response response;
     Dio dio = Dio(dioOptions);
-    Map<String, dynamic> data = {"img_data": imgData, "num_of_results": 50};
+    final String endpoint = isUserFineTuned ? '/search' : '/detect';
+    data = {"img_data": imgData, "num_of_results": 20};
 
     for (int i = 0; i < numRetries; i++) {
       try {
-        response = await dio.post('/detect', data: data);
+        response = await dio.post(endpoint, data: data);
         logger.d(response.statusCode);
         String statusCode =
             response.statusCode != null ? response.statusCode.toString() : "";
 
         if (statusCode.startsWith("2")) {
-          logger.d(response.data.runtimeType);
+          logger.d(response.data);
           return response.data;
         } else {
           return null;

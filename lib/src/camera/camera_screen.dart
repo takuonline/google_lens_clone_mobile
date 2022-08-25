@@ -140,17 +140,15 @@ class _CameraViewState extends State<CameraView>
   void didChangeAppLifecycleState(AppLifecycleState state) {
     final CameraProvider model = context.read<CameraProvider>();
 
-    final CameraController? cameraController = model.controller;
-
     // App state changed before we got the chance to initialize.
-    if (cameraController == null || !cameraController.value.isInitialized) {
+    if (model.controller == null || !model.controller!.value.isInitialized) {
       return;
     }
 
     if (state == AppLifecycleState.inactive) {
-      cameraController.dispose();
+      model.controller!.dispose();
     } else if (state == AppLifecycleState.resumed) {
-      model.onNewCameraSelected(cameraController.description);
+      model.onNewCameraSelected(model.controller!.description);
     }
   }
 
@@ -191,14 +189,14 @@ class _CameraViewState extends State<CameraView>
     ApiService api = ApiService();
 
     final base64Img = await imgDataToBase64(pictureTaken);
-    final Map<String, dynamic>? res = await api.postImage(base64Img);
+
+    final Map<String, dynamic>? res =
+        await api.postImage(base64Img, isUserFineTuned);
 
     if (res != null) {
-      String label = res["is_crop"] == false ? res["title"] : "";
+      String label = res["is_crop"] == false ? res["title"] ?? "" : "";
       List<dynamic> imShape = res["im_shape"];
       List<dynamic> bounds = res["bounds"].map((v) => v.toDouble()).toList();
-
-      logger.d(res["similar_products"]);
 
       setState(() {
         productData = res["similar_products"];
@@ -239,9 +237,9 @@ class _CameraViewState extends State<CameraView>
       });
 
       if (label != null) {
-        setState(() {
-          imgLabel = label;
-        });
+        // setState(() {
+        //   imgLabel = label;
+        // });
         logger.i(label);
       } else {
         setState(() {
@@ -301,133 +299,161 @@ class _CameraViewState extends State<CameraView>
     queryData = MediaQuery.of(context);
     final size = queryData.size;
 
-    return Scaffold(
-      key: _scaffoldKey,
-      body: WillPopScope(
-        onWillPop: () async {
-          logger.w("Will pop scope");
-          setState(() {
-            isLoading = false;
-            pictureTaken = null;
-            productData.clear();
-            imgLabel = null;
-          });
-          return false;
-        },
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.start,
-          mainAxisSize: MainAxisSize.max,
-          children: <Widget>[
-            SizedBox(
-              height: size.height * .85,
-              child: Stack(
-                alignment: Alignment.topCenter,
-                children: [
-                  pictureTaken == null
-                      ? Container(
-                          decoration: const BoxDecoration(
-                            borderRadius: BorderRadius.vertical(
-                                bottom: Radius.circular(20)),
-                          ),
-                          child: _cameraPreviewWidget(),
-                        )
-                      : _buildCropWidget(),
-                  if (pictureTaken != null && productData.isNotEmpty)
-                    SizedBox.expand(
-                      child: DraggableScrollableSheet(
-                        maxChildSize: 1,
-                        minChildSize: .1,
-                        initialChildSize: .1,
-                        builder: (BuildContext context,
-                            ScrollController scrollController) {
-                          return Container(
-                            padding: const EdgeInsets.only(top: 20),
+    return SafeArea(
+      child: Scaffold(
+        extendBodyBehindAppBar: true,
+        backgroundColor: Colors.black,
+        key: _scaffoldKey,
+
+        appBar: AppBar(
+
+          backgroundColor: const Color(0x44000000),
+          elevation: 0,
+          title: const Text("Google lens clone"),
+          centerTitle: true,
+        ),
+        body: WillPopScope(
+          onWillPop: () async {
+            logger.w("Will pop scope");
+            setState(() {
+              isLoading = false;
+              pictureTaken = null;
+              productData.clear();
+              imgLabel = null;
+            });
+            return false;
+          },
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.start,
+            mainAxisSize: MainAxisSize.max,
+            children: <Widget>[
+              SizedBox(
+                height: size.height * .85,
+                child: Stack(
+                  alignment: Alignment.topCenter,
+                  children: [
+                    pictureTaken == null
+                        ? Container(
                             decoration: const BoxDecoration(
                               borderRadius: BorderRadius.vertical(
-                                  top: Radius.circular(30)),
-                              color: Colors.white,
+                                  bottom: Radius.circular(12)),
                             ),
-                            child: GridView.builder(
-                              gridDelegate:
-                                  const SliverGridDelegateWithMaxCrossAxisExtent(
-                                      maxCrossAxisExtent: 250,
-                                      // childAspectRatio: 2/3,
-                                      crossAxisSpacing: 4,
-                                      mainAxisSpacing: 4),
-                              controller: scrollController,
-                              itemCount: productData.length,
-                              itemBuilder: (BuildContext context, int index) {
-                                final Map<String, dynamic> prod =
-                                    productData[index];
-                                final bool showImg = !prod["img"]
-                                    .toString()
-                                    .toLowerCase()
-                                    .contains("missing_product");
+                            child: _cameraPreviewWidget(),
+                          )
+                        : _buildCropWidget(),
+                    if (pictureTaken != null && productData.isNotEmpty)
+                      SizedBox.expand(
+                        child: DraggableScrollableSheet(
+                          maxChildSize: 1,
+                          minChildSize: .2,
+                          initialChildSize: .2,
+                          builder: (BuildContext context,
+                              ScrollController scrollController) {
+                            return Container(
+                              padding: const EdgeInsets.only(top: 20),
+                              decoration: const BoxDecoration(
+                                borderRadius: BorderRadius.vertical(
+                                    top: Radius.circular(22)),
+                                color: Colors.white,
+                              ),
+                              child: GridView.builder(
+                                gridDelegate:
+                                    const SliverGridDelegateWithMaxCrossAxisExtent(
+                                        maxCrossAxisExtent: 250,
+                                        // childAspectRatio: 2/3,
+                                        crossAxisSpacing: 4,
+                                        mainAxisSpacing: 4),
+                                controller: scrollController,
+                                itemCount: productData.length,
+                                itemBuilder: (BuildContext context, int index) {
+                                  final Map<String, dynamic> prod =
+                                      productData[index];
+                                  final bool showImg = !prod["img"]
+                                      .toString()
+                                      .toLowerCase()
+                                      .contains("missing_product");
 
-                                return Card(
-                                    elevation: 1,
-                                    margin: const EdgeInsets.only(
-                                        top: 5,
-                                        left: 10,
-                                        right: 10,
-                                        bottom: 10),
-                                    child: Padding(
-                                      padding: const EdgeInsets.all(12.0),
-                                      child: Column(
-                                        children: [
-                                          Text(
-                                            "${index + 1}.  " + prod["title"],
-                                            maxLines: 3,
-                                          ),
-                                          Spacer(),
-                                          showImg
-                                              ? Image.network(
-                                                  prod["img"],
-                                                  height: SizeConfig
+                                  return Card(
+                                      elevation: 0,
+                                      margin: const EdgeInsets.only(
+                                          top: 5,
+                                          left: 10,
+                                          right: 10,
+                                          bottom: 10),
+                                      child: Padding(
+                                        padding: const EdgeInsets.all(12.0),
+                                        child: Column(
+                                          children: [
+                                            Container(
+                                              padding: EdgeInsets.symmetric(
+                                                  horizontal: SizeConfig
+                                                          .safeBlockHorizontal *
+                                                      2,
+                                                  vertical: SizeConfig
                                                           .safeBlockVertical *
-                                                      12,
-                                                )
-                                              : Image.network(
-                                                  "https://www.pnp.co.za" +
-                                                      prod["img"]
-                                                          .toString()
-                                                          .replaceAll("140x140",
-                                                              "400x400"),
-                                                  height: 90,
-                                                )
-                                        ],
-                                      ),
-                                    ));
-                              },
-                            ),
-                          );
-                        },
+                                                      .9),
+                                              decoration: const BoxDecoration(),
+                                              child: showImg
+                                                  ? Image.network(
+                                                      prod["img"],
+                                                      height: SizeConfig
+                                                              .safeBlockVertical *
+                                                          12,
+                                                    )
+                                                  : Image.network(
+                                                      "https://www.pnp.co.za" +
+                                                          prod["img"]
+                                                              .toString()
+                                                              .replaceAll(
+                                                                  "140x140",
+                                                                  "400x400"),
+                                                      height: 90,
+                                                    ),
+                                            ),
+                                            const Spacer(),
+                                            Text(
+                                              "${index + 1}.  " + prod["title"],
+                                              style: const TextStyle(fontSize: 12),
+                                              maxLines: 2,
+                                            ),
+                                          ],
+                                        ),
+                                      ));
+                                },
+                              ),
+                            );
+                          },
+                        ),
                       ),
-                    ),
-                ],
+                  ],
+                ),
               ),
-            ),
-            if (imgLabel != null)
-              Container(
-                padding: EdgeInsets.all(2),
-                // margin: EdgeInsets.all(20),
+              if (imgLabel != null)
+                Container(
+                  padding: const EdgeInsets.all(2),
+                  // margin: EdgeInsets.all(20),
 
-                color: Colors.red,
-                child: Text(imgLabel ?? ""),
-              ),
+                  color: Colors.red,
+                  child: Text(imgLabel ?? ""),
+                ),
 
-            if (isLoading) LinearProgressIndicator(),
+              if (isLoading)
+                const LinearProgressIndicator(
+                  color: Colors.orange,
+                ),
 
-            Container(
-              decoration:
-                  BoxDecoration(borderRadius: BorderRadius.circular(300)),
-              child: _captureControlWidget(),
-            ),
+              // Container(
+              //   decoration: BoxDecoration(
+              //       color: Colors.black,
+              //       borderRadius: BorderRadius.circular(300)),
+              //   child: _captureControlWidget(),
+              // ),
 
-            // _captureControlWidget(),
-            // _modeControlRowWidget(),
-            // _cameraTogglesRowWidget(),
-          ],
+              _captureControlWidget(),
+              // _modeControlRowWidget(),
+              // _cameraTogglesRowWidget(),
+            ],
+          ),
         ),
       ),
     );
@@ -442,7 +468,7 @@ class _CameraViewState extends State<CameraView>
       // onMoved: (rect) {
       //   // logger.i(rect.toString());
       // },
-      baseColor: Colors.white,
+      baseColor: Colors.black,
       controller: cropController,
     );
   }
@@ -461,27 +487,27 @@ class _CameraViewState extends State<CameraView>
 
                 // If the Future is complete, display the preview.
                 return Listener(
-                    onPointerDown: (_) => _pointers++,
-                    onPointerUp: (_) => _pointers--,
-                    child: ClipRRect(
-                      borderRadius: const BorderRadius.vertical(
-                          bottom: Radius.circular(20)),
-                      child: CameraPreview(
-                        model.controller!,
-                        child: LayoutBuilder(
-                          builder: (BuildContext context,
-                              BoxConstraints constraints) {
-                            return GestureDetector(
-                              behavior: HitTestBehavior.opaque,
-                              onScaleStart: _handleScaleStart,
-                              onScaleUpdate: _handleScaleUpdate,
-                              onTapDown: (details) =>
-                                  onViewFinderTap(details, constraints),
-                            );
-                          },
-                        ),
+                  onPointerDown: (_) => _pointers++,
+                  onPointerUp: (_) => _pointers--,
+                  child: ClipRRect(
+                    borderRadius: const BorderRadius.vertical(
+                        bottom: Radius.circular(20)),
+                    child: CameraPreview(
+                      model.controller!,
+                      child: LayoutBuilder(
+                        builder:
+                            (BuildContext context, BoxConstraints constraints) {
+                          return GestureDetector(
+                            behavior: HitTestBehavior.opaque,
+                            onScaleStart: _handleScaleStart,
+                            onScaleUpdate: _handleScaleUpdate,
+                            onTapDown: (details) =>
+                                onViewFinderTap(details, constraints),
+                          );
+                        },
                       ),
                     ),
+                  ),
                 );
 
                 //   Transform.scale(
@@ -611,22 +637,33 @@ class _CameraViewState extends State<CameraView>
   Widget _captureControlWidget() {
     final CameraController? cameraController =
         context.watch<CameraProvider>().controller;
-    final double fabBtnSize = SizeConfig.safeBlockHorizontal * 18;
-    return SizedBox(
-      height: fabBtnSize,
-      width: fabBtnSize,
-      child: FittedBox(
-        child: FloatingActionButton(
-          child: Icon(Icons.search, size: SizeConfig.safeBlockHorizontal * 7),
-          onPressed: pictureTaken == null
-              ? (cameraController != null &&
-                      cameraController.value.isInitialized &&
-                      !cameraController.value.isRecordingVideo
-                  ? onTakePictureButtonPressed
-                  : null)
-              : () => cropController.crop(),
-
-          // onPressed:getHealthCheck
+    final double fabBtnSize = SizeConfig.safeBlockHorizontal * 16;
+    return Material(
+      type: MaterialType.transparency,
+      child: Ink(
+        padding: const EdgeInsets.all(5),
+        decoration: BoxDecoration(
+          border: Border.all(color: Colors.deepOrange, width: 2.0),
+          color: Colors.black,
+          shape: BoxShape.circle,
+        ),
+        child: SizedBox(
+          height: fabBtnSize,
+          width: fabBtnSize,
+          child: FittedBox(
+            child: FloatingActionButton(
+              child:
+                  Icon(Icons.search, size: SizeConfig.safeBlockHorizontal * 6),
+              onPressed: pictureTaken == null
+                  ? (cameraController != null &&
+                          cameraController.value.isInitialized &&
+                          !cameraController.value.isRecordingVideo
+                      ? onTakePictureButtonPressed
+                      : null)
+                  : () => cropController.crop(),
+              // onPressed:getHealthCheck
+            ),
+          ),
         ),
       ),
     );
