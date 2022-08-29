@@ -65,11 +65,11 @@ dev_dependencies:
 flutter_icons:
   android: true
   ios: true
-  image_path: "assets/images/applogo.png"
+  image_path: "assets/images/applogo2.png"
   min_sdk_android: 21 # android min sdk min:16, default 21
   web:
     generate: true
-    image_path: "assets/images/FreshWordLogo.png"
+    image_path: "assets/images/applogo2.png"
     background_color: "#ffffff"
 
 # For information on the generic Dart part of this file, see the
