@@ -1,4 +1,5 @@
-import 'dart:io';
+// import 'dart:io' if (dart.library.html) 'dart:html';
+import 'package:universal_io/io.dart';
 
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
@@ -7,25 +8,17 @@ import 'package:logger/logger.dart';
 class ApiService {
   final logger = Logger();
   final numRetries = 1;
-  // final baseUrl = "http://10.0.2.2:8000";
-  // final baseUrl = "https://google.com/";
-  // final baseUrl = "http://34.241.37.140:8000";
-  final Map<String, String> _headers = {
-    'Content-Type': 'application/json;charset=UTF-8',
-    'Charset': 'utf-8',
-    'Connection': "Keep-Alive",
-    "Keep-Alive": "timeout=5, max=100"
-  };
 
   final dioOptions = BaseOptions(
-      baseUrl: "http://10.0.2.2:8000",
-      // baseUrl: "http://54.170.227.68:8000",
+      // baseUrl: "http://10.0.2.2:8000", // when running on localhost
+      baseUrl: "http://52.48.118.120:8000",
       connectTimeout: 15000,
       receiveTimeout: 15000,
       headers: {
         'Content-Type': 'application/json;charset=UTF-8',
         'Charset': 'utf-8',
         'Connection': "keep-alive",
+        "Keep-Alive": "timeout=5, max=100"
       });
 
   Future<void> getHealthCheck() async {
@@ -59,9 +52,6 @@ class ApiService {
         } else {
           return null;
         }
-      } on HttpException {
-        logger.w("HttpException");
-        continue;
       } catch (e) {
         logger.e(e);
       }

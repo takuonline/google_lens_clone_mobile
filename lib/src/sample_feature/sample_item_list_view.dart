@@ -31,8 +31,6 @@ class SampleItemListView extends StatefulWidget {
 }
 
 class _SampleItemListViewState extends State<SampleItemListView> {
-
-
   final logger = Logger();
 
   String? getHealthCheck() {
@@ -77,24 +75,18 @@ class _SampleItemListViewState extends State<SampleItemListView> {
           String _routeName = "";
           Widget _title = Text('SampleItem ${item.id}');
 
-
           if (index == 3) {
             _routeName = CameraView.routeName;
             _title = Text('Camera Example View  ');
-          }
-
-          else {
+          } else {
             _routeName = SampleItemDetailsView.routeName;
           }
 
           Widget tile = ListTile(
               title: _title,
               leading:
-                // Display the Flutter Logo image asset.
-             const  FlutterLogo(
-
-                )
-               ,
+                  // Display the Flutter Logo image asset.
+                  const FlutterLogo(),
               onTap: () {
                 // Navigate to the details page. If the user leaves and returns to
                 // the app after it has been killed while running in the

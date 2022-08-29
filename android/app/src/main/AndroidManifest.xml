@@ -3,7 +3,7 @@
     <uses-permission android:name="android.permission.INTERNET" />
 
     <application
-        android:label="google_lense_clone"
+        android:label="Google lens clone"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity

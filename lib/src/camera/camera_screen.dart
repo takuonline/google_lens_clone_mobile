@@ -1,6 +1,9 @@
 import 'dart:async';
-import 'dart:io';
+// import 'dart:io' if (dart.library.html) 'dart:html' as html  ;
+import 'package:universal_io/io.dart';
+
 import 'dart:typed_data';
+import 'package:flutter/services.dart';
 import 'package:get/get.dart';
 import 'package:logger/logger.dart';
 import 'package:camera/camera.dart';
@@ -76,6 +79,7 @@ class _CameraViewState extends State<CameraView>
   Rect? initialCropArea;
   List productData = [];
   bool isLoading = false;
+  Future<ByteData>? pictureTakenUint8;
 
   CameraLensDirection lenseDirection = CameraLensDirection.back;
   late Future<void> _initializeControllerFuture;
@@ -304,14 +308,15 @@ class _CameraViewState extends State<CameraView>
         extendBodyBehindAppBar: true,
         backgroundColor: Colors.black,
         key: _scaffoldKey,
-
-        appBar: AppBar(
-
-          backgroundColor: const Color(0x44000000),
-          elevation: 0,
-          title: const Text("Google lens clone"),
-          centerTitle: true,
-        ),
+        appBar: kIsWeb
+            ? null
+            : AppBar(
+                backgroundColor: Colors.transparent,
+                //const Color(0x44000000),
+                elevation: 0,
+                title: const Text("Google lens clone"),
+                centerTitle: true,
+              ),
         body: WillPopScope(
           onWillPop: () async {
             logger.w("Will pop scope");
@@ -413,7 +418,8 @@ class _CameraViewState extends State<CameraView>
                                             const Spacer(),
                                             Text(
                                               "${index + 1}.  " + prod["title"],
-                                              style: const TextStyle(fontSize: 12),
+                                              style:
+                                                  const TextStyle(fontSize: 12),
                                               maxLines: 2,
                                             ),
                                           ],
@@ -441,7 +447,9 @@ class _CameraViewState extends State<CameraView>
                 const LinearProgressIndicator(
                   color: Colors.orange,
                 ),
-
+              SizedBox(
+                height: 10,
+              ),
               // Container(
               //   decoration: BoxDecoration(
               //       color: Colors.black,
@@ -450,6 +458,7 @@ class _CameraViewState extends State<CameraView>
               // ),
 
               _captureControlWidget(),
+
               // _modeControlRowWidget(),
               // _cameraTogglesRowWidget(),
             ],
@@ -459,18 +468,38 @@ class _CameraViewState extends State<CameraView>
     );
   }
 
+  getWebPic() async {
+    pictureTakenUint8 = rootBundle.load(pictureTaken!.path);
+    setState(() {});
+  }
+
   Widget _buildCropWidget() {
-    return Crop(
-      key: cropAreaKey,
-      onCropped: onCropped,
-      image: File(pictureTaken!.path).readAsBytesSync(),
-      initialArea: Rect.zero,
-      // onMoved: (rect) {
-      //   // logger.i(rect.toString());
-      // },
-      baseColor: Colors.black,
-      controller: cropController,
-    );
+    Crop _cropWidget(Uint8List data) => Crop(
+          key: cropAreaKey,
+          onCropped: onCropped,
+          image:
+              data, //kIsWeb ? getWebPic()  : File(pictureTaken!.path).readAsBytesSync(),
+          initialArea: Rect.zero,
+          // onMoved: (rect) {
+          //   // logger.i(rect.toString());
+          // },
+          baseColor: Colors.black,
+          controller: cropController,
+        );
+
+    if (kIsWeb) {
+      return FutureBuilder(
+          future: pictureTakenUint8,
+          builder: (BuildContext context, AsyncSnapshot snapshot) {
+            if (snapshot.hasData) {
+              return _cropWidget(snapshot.data.buffer.asUint8List());
+            } else {
+              return const CircularProgressIndicator();
+            }
+          });
+    } else {
+      return _cropWidget(File(pictureTaken!.path).readAsBytesSync());
+    }
   }
 
   Widget _cameraPreviewWidget() {
@@ -533,7 +562,7 @@ class _CameraViewState extends State<CameraView>
     final model = context.read<CameraProvider>();
 
     // When there are not exactly two fingers on screen don't scale
-    if (context.watch<CameraProvider>().controller == null || _pointers != 2) {
+    if (context.read<CameraProvider>().controller == null || _pointers != 2) {
       return;
     }
 
@@ -541,7 +570,7 @@ class _CameraViewState extends State<CameraView>
         .clamp(model.minAvailableZoom, model.maxAvailableZoom);
 
     await context
-        .watch<CameraProvider>()
+        .read<CameraProvider>()
         .controller!
         .setZoomLevel(_currentScale);
   }
@@ -583,7 +612,7 @@ class _CameraViewState extends State<CameraView>
   }
 
   Widget _flashModeControlRowWidget() {
-    final _controller = context.watch<CameraProvider>().controller;
+    final _controller = context.read<CameraProvider>().controller;
     return SizeTransition(
       sizeFactor: _flashModeControlRowAnimation,
       child: ClipRect(
@@ -670,7 +699,7 @@ class _CameraViewState extends State<CameraView>
   }
 
   void onViewFinderTap(TapDownDetails details, BoxConstraints constraints) {
-    final _controller = context.watch<CameraProvider>().controller;
+    final _controller = context.read<CameraProvider>().controller;
 
     if (_controller == null) {
       return;
